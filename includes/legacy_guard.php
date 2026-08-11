@@ -28,8 +28,6 @@ require_once __DIR__ . '/bootstrap.php';
  * safe default: too strict is recoverable, too loose is a breach.
  */
 $legacyAccess = [
-    'customers.php'         => ['admin', 'manager', 'cashier'],
-
     'reports.php'           => ['admin', 'manager'],
     'export_report.php'     => ['admin', 'manager'],
     'export_user_roles.php' => ['admin'],
