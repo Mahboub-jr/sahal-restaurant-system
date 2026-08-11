@@ -28,17 +28,6 @@ require_once __DIR__ . '/bootstrap.php';
  * safe default: too strict is recoverable, too loose is a breach.
  */
 $legacyAccess = [
-    'place_order.php'       => ['admin', 'manager', 'cashier', 'waiter'],
-    'submit_order.php'      => ['admin', 'manager', 'cashier', 'waiter'],
-    'add_order.php'         => ['admin', 'manager', 'cashier', 'waiter'],
-    'orders.php'            => ['admin', 'manager', 'cashier', 'waiter'],
-    'update_order.php'      => ['admin', 'manager', 'cashier'],
-    'cancel_order.php'      => ['admin', 'manager'],
-    'complete_order.php'    => ['admin', 'manager', 'cashier'],
-    'cancelled_orders.php'  => ['admin', 'manager'],
-    'order_history.php'     => ['admin', 'manager', 'cashier'],
-    'receipt.php'           => ['admin', 'manager', 'cashier'],
-
     'categories.php'        => ['admin', 'manager'],
 
     'tables.php'            => ['admin', 'manager', 'waiter'],

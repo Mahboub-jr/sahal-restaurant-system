@@ -6,9 +6,9 @@
  * PHP loop to work out best sellers (AUDIT.md F3) — that does not survive
  * contact with a real order volume. Everything here is aggregated in SQL.
  *
- * Item-level figures still read orders.items because order_items does not
- * exist yet; that is the Phase 3 migration. Where a number is only as good
- * as that blob, the card says so rather than implying false precision.
+ * Best sellers reads order_items when migration 005 has been applied, and
+ * falls back to parsing the legacy orders.items JSON blob when it has not
+ * -- the same degrade-gracefully pattern menu.php uses for is_available.
  */
 
 require_once __DIR__ . '/includes/bootstrap.php';
@@ -118,29 +118,51 @@ $categoryRows = db_all(
       LIMIT 8'
 );
 
-// Best sellers. Still parsed from the JSON blob, so it is explicitly
-// labelled as approximate until Phase 3 introduces order_items.
-$itemCounts = [];
+// Best sellers.
+$hasOrderItems = db_value(
+    "SELECT 1 FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'order_items'",
+    [DB_NAME]
+) !== null;
+
+$itemCounts  = [];
 $unparseable = 0;
-foreach (db_all("SELECT items FROM orders WHERE status <> 'Cancelled'") as $row) {
-    $decoded = json_decode((string) $row['items'], true);
-    if (!is_array($decoded)) {
-        if (trim((string) $row['items']) !== '') {
-            $unparseable++;
-        }
-        continue;
+
+if ($hasOrderItems) {
+    // Real quantities, summed in SQL. No longer an approximation.
+    foreach (db_all(
+        "SELECT oi.item_name, SUM(oi.quantity) AS qty
+           FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+          WHERE o.status <> 'Cancelled'
+          GROUP BY oi.item_name"
+    ) as $row) {
+        $itemCounts[(string) $row['item_name']] = (int) $row['qty'];
     }
-    foreach ($decoded as $line) {
-        if (!is_array($line) || !isset($line['name'])) {
+} else {
+    // Migration 005 has not run yet -- fall back to the legacy JSON blob,
+    // counting one line as one sale since quantities are not recorded there.
+    foreach (db_all("SELECT items FROM orders WHERE status <> 'Cancelled'") as $row) {
+        $decoded = json_decode((string) $row['items'], true);
+        if (!is_array($decoded)) {
+            if (trim((string) $row['items']) !== '') {
+                $unparseable++;
+            }
             continue;
         }
-        $name = trim((string) $line['name']);
-        if ($name === '') {
-            continue;
+        foreach ($decoded as $line) {
+            if (!is_array($line) || !isset($line['name'])) {
+                continue;
+            }
+            $name = trim((string) $line['name']);
+            if ($name === '') {
+                continue;
+            }
+            $itemCounts[$name] = ($itemCounts[$name] ?? 0) + 1;
         }
-        $itemCounts[$name] = ($itemCounts[$name] ?? 0) + 1;
     }
 }
+
 arsort($itemCounts);
 $topItems = array_slice($itemCounts, 0, 6, true);
 $topMax   = $topItems === [] ? 1 : max($topItems);
@@ -348,10 +370,12 @@ include __DIR__ . '/includes/layout/app_start.php';
     <div class="card h-100">
       <div class="card-header">
         <h2>Best sellers</h2>
-        <span class="badge-soft badge-soft--warn" data-bs-toggle="tooltip"
-              title="Counted from the orders.items JSON blob. Quantities are not recorded yet, so each line counts once. Accurate figures arrive with the order_items migration.">
-          Approximate
-        </span>
+        <?php if (!$hasOrderItems): ?>
+          <span class="badge-soft badge-soft--warn" data-bs-toggle="tooltip"
+                title="Counted from the legacy orders.items JSON blob. Quantities are not recorded there, so each line counts once. Run migration 005 for accurate figures.">
+            Approximate
+          </span>
+        <?php endif; ?>
       </div>
       <div class="card-body">
         <?php if ($topItems === []): ?>

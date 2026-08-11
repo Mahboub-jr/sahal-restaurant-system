@@ -1,177 +1,184 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Order history — Completed and Cancelled orders.
+ *
+ * Read-only. No status can change from here; go to Orders while a job is
+ * still in progress.
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin', 'manager', 'cashier');
+
+$title    = 'Order history';
+$subtitle = 'Completed & cancelled orders';
+
+$schemaReady = db_value(
+    "SELECT 1 FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'order_items'",
+    [DB_NAME]
+) !== null;
+
+include __DIR__ . '/includes/layout/app_start.php';
+
+if (!$schemaReady): ?>
+  <div class="page-head"><h1 class="page-head__title">Order history</h1></div>
+  <div class="alert alert-warning">
+    <i class="bi bi-database-exclamation"></i>
+    <div>
+      <strong>Migration 005 has not been run yet.</strong>
+      Apply <code>sql/migrations/005_order_items_and_totals.sql</code> in phpMyAdmin
+      to see order history here.
+    </div>
+  </div>
+<?php
+  include __DIR__ . '/includes/layout/app_end.php';
+  exit;
+endif;
+
+$search   = query('customer');
+$statusF  = one_of(query('status'), ['Completed', 'Cancelled'], '');
+$fromDate = query('from_date');
+$toDate   = query('to_date');
+
+$where  = ["o.status IN ('Completed','Cancelled')"];
+$params = [];
+
+if ($statusF !== '') {
+    $where[]  = 'o.status = ?';
+    $params[] = $statusF;
+}
+if ($search !== '') {
+    $where[]  = 'o.customer_name LIKE ?';
+    $params[] = '%' . $search . '%';
+}
+if ($fromDate !== '') {
+    $where[]  = 'DATE(o.created_at) >= ?';
+    $params[] = $fromDate;
+}
+if ($toDate !== '') {
+    $where[]  = 'DATE(o.created_at) <= ?';
+    $params[] = $toDate;
+}
+
+$orders = db_all(
+    "SELECT o.*, t.table_number, u.name AS waiter_name,
+            (SELECT GROUP_CONCAT(CONCAT(oi.quantity, 'x ', oi.item_name) SEPARATOR ', ')
+               FROM order_items oi WHERE oi.order_id = o.id) AS items_summary
+       FROM orders o
+       LEFT JOIN tables t ON t.id = o.table_id
+       LEFT JOIN users  u ON u.id = o.user_id
+      WHERE " . implode(' AND ', $where) . '
+      ORDER BY o.updated_at DESC',
+    $params
+);
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Order History</title>
-  <link rel="stylesheet" href="css/main.css">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <?php include "library/head.php"; ?>
-  <style>
-    /* Optional: tighten up table rows */
-    #historyTable tbody tr td { vertical-align: middle; }
-  </style>
-</head>
-<body class="app sidebar-mini">
-  <?php include "library/sidebar.php"; ?>
-  <?php include "library/header.php"; ?>
-
-  <main class="app-content">
-    <div class="container-fluid">
-      <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0"><i class="bi bi-clock-history me-2"></i>Order History</h1>
-        <small class="text-muted">Completed &amp; Canceled Orders</small>
-      </div>
-
-      <div class="card shadow-sm">
-        <div class="card-body p-0">
-
-        <div class="container mt-4 mb-3">
-  <h4 class="mb-3"><i class="bi bi-funnel"></i> Filter Orders</h4>
-  <form method="GET" class="row g-3 align-items-end">
-    
-    <!-- Customer Name -->
-    <div class="col-md-4">
-      <label class="form-label">Customer Name</label>
-      <input type="text" name="customer" class="form-control" placeholder="Enter name" value="<?= isset($_GET['customer']) ? htmlspecialchars($_GET['customer']) : '' ?>">
-    </div>
-
-    <!-- Status -->
-    <div class="col-md-3">
-      <label class="form-label">Status</label>
-      <select name="status" class="form-select">
-        <option value="">All</option>
-        <option value="Pending" <?= isset($_GET['status']) && $_GET['status'] === 'Pending' ? 'selected' : '' ?>>Pending</option>
-        <option value="In Progress" <?= isset($_GET['status']) && $_GET['status'] === 'In Progress' ? 'selected' : '' ?>>In Progress</option>
-        <option value="Preparing" <?= isset($_GET['status']) && $_GET['status'] === 'Preparing' ? 'selected' : '' ?>>Preparing</option>
-        <option value="Ready" <?= isset($_GET['status']) && $_GET['status'] === 'Ready' ? 'selected' : '' ?>>Ready</option>
-        <option value="Completed" <?= isset($_GET['status']) && $_GET['status'] === 'Completed' ? 'selected' : '' ?>>Completed</option>
-        <option value="Canceled" <?= isset($_GET['status']) && $_GET['status'] === 'Canceled' ? 'selected' : '' ?>>Canceled</option>
-      </select>
-    </div>
-
-    <!-- Date Range -->
-    <div class="col-md-2">
-      <label class="form-label">From Date</label>
-      <input type="date" name="from_date" class="form-control" value="<?= isset($_GET['from_date']) ? htmlspecialchars($_GET['from_date']) : '' ?>">
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">To Date</label>
-      <input type="date" name="to_date" class="form-control" value="<?= isset($_GET['to_date']) ? htmlspecialchars($_GET['to_date']) : '' ?>">
-    </div>
-
-    <!-- Filter Button -->
-    <div class="col-md-1">
-      <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search"></i></button>
-    </div>
-  </form>
+<div class="page-head">
+  <div>
+    <h1 class="page-head__title">Order history</h1>
+    <p class="page-head__sub"><?= count($orders) ?> order<?= count($orders) === 1 ? '' : 's' ?></p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn-outline-secondary" href="<?= url('orders.php') ?>">
+      <i class="bi bi-receipt"></i> Active orders
+    </a>
+  </div>
 </div>
 
-        
-          <table class="table table-hover mb-0" id="historyTable">
-            <thead class="table-light">
-              <tr>
-                <th>#</th>
-                <th>Customer</th>
-                <th>Type</th>
-                <th>Items</th>
-                <th>Total ($)</th>
-                <th>Status</th>
-                <th>Updated At</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php 
-
-$filters = [];
-$where = "";
-
-if (!empty($_GET['customer'])) {
-    $customer = mysqli_real_escape_string($conn, $_GET['customer']);
-    $filters[] = "customer_name LIKE '%$customer%'";
-}
-
-if (!empty($_GET['status'])) {
-    $status = mysqli_real_escape_string($conn, $_GET['status']);
-    $filters[] = "status = '$status'";
-}
-
-if (!empty($_GET['from_date'])) {
-    $from = mysqli_real_escape_string($conn, $_GET['from_date']);
-    $filters[] = "DATE(created_at) >= '$from'";
-}
-
-if (!empty($_GET['to_date'])) {
-    $to = mysqli_real_escape_string($conn, $_GET['to_date']);
-    $filters[] = "DATE(created_at) <= '$to'";
-}
-
-if (count($filters) > 0) {
-    $where = "WHERE " . implode(" AND ", $filters);
-}
-
-$sql = "SELECT * FROM orders $where ORDER BY created_at DESC";
-$result = mysqli_query($conn, $sql);
-
-
-              $sql = "SELECT * FROM orders WHERE status IN ('Completed','Canceled') ORDER BY updated_at DESC";
-              $res = mysqli_query($conn, $sql);
-              if (!$res) {
-                echo "<tr><td colspan='7' class='text-center text-danger'>Query failed: " . mysqli_error($conn) . "</td></tr>";
-              } elseif (mysqli_num_rows($res) === 0) {
-                echo "<tr><td colspan='7' class='text-center text-muted'>No completed or canceled orders found.</td></tr>";
-              } else {
-                $i = 1;
-                while ($row = mysqli_fetch_assoc($res)) {
-                  // Decode & format items
-                  $items_html = '<ul class="list-unstyled mb-0">';
-                  $items = json_decode($row['items'], true);
-                  if (json_last_error() === JSON_ERROR_NONE && is_array($items)) {
-                    foreach ($items as $it) {
-                      $n = htmlspecialchars($it['name']);
-                      $p = number_format($it['price'], 2);
-                      $items_html .= "<li><i class='bi bi-dot'></i> $n <span class='text-muted'>(\$$p)</span></li>";
-                    }
-                  } else {
-                    $items_html .= "<li class='text-danger'>Invalid item data</li>";
-                  }
-                  $items_html .= '</ul>';
-
-                  // Status badge
-                  switch ($row['status']) {
-                    case 'Completed': $badge = 'success'; break;
-                    case 'Canceled':  $badge = 'danger';  break;
-                    default:          $badge = 'secondary';
-                  }
-
-                  // Print row
-                  echo "<tr>
-                          <td>{$i}</td>
-                          <td>" . htmlspecialchars($row['customer_name']) . "</td>
-                          <td>" . htmlspecialchars($row['order_type']) . "</td>
-                          <td>{$items_html}</td>
-                          <td>" . number_format($row['total_amount'], 2) . "</td>
-                          <td><span class='badge bg-{$badge}'>" . htmlspecialchars($row['status']) . "</span></td>
-                          <td>" . date('d M Y, H:i', strtotime($row['updated_at'])) . "</td>
-                        </tr>";
-                  $i++;
-                }
-              }
-              ?>
-            </tbody>
-          </table>
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label" for="customer">Customer</label>
+        <input class="form-control" type="text" id="customer" name="customer" value="<?= e($search) ?>" placeholder="Name">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="status">Status</label>
+        <select class="form-select" id="status" name="status">
+          <option value="">Completed & Cancelled</option>
+          <option value="Completed" <?= $statusF === 'Completed' ? 'selected' : '' ?>>Completed only</option>
+          <option value="Cancelled" <?= $statusF === 'Cancelled' ? 'selected' : '' ?>>Cancelled only</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="from_date">From</label>
+        <input class="form-control" type="date" id="from_date" name="from_date" value="<?= e($fromDate) ?>">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="to_date">To</label>
+        <input class="form-control" type="date" id="to_date" name="to_date" value="<?= e($toDate) ?>">
+      </div>
+      <div class="col-md-1">
+        <button class="btn btn-primary w-100" type="submit"><i class="bi bi-search"></i></button>
+      </div>
+      <?php if ($search !== '' || $statusF !== '' || $fromDate !== '' || $toDate !== ''): ?>
+        <div class="col-12">
+          <a class="btn btn-ghost btn-sm" href="<?= url('order_history.php') ?>"><i class="bi bi-x-lg"></i> Clear filters</a>
         </div>
+      <?php endif; ?>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <?php if ($orders === []): ?>
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty__icon"><i class="bi bi-clock-history"></i></div>
+        <div class="empty__title">Nothing here yet</div>
+        <p class="empty__text">Completed and cancelled orders will appear once they happen.</p>
       </div>
     </div>
-  </main>
+  <?php else: ?>
+    <div class="table-wrap">
+      <table class="table" id="historyTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Customer</th>
+            <th>Type / table</th>
+            <th>Items</th>
+            <th class="text-end">Total</th>
+            <th>Status</th>
+            <th>Payment</th>
+            <th>Updated</th>
+            <th class="text-end">Receipt</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($orders as $o): ?>
+            <tr>
+              <td><?= e($o['order_number'] ?? ('#' . $o['id'])) ?></td>
+              <td>
+                <div class="table__primary"><?= e($o['customer_name']) ?></div>
+                <?php if ($o['waiter_name']): ?><div class="table__secondary">by <?= e($o['waiter_name']) ?></div><?php endif; ?>
+              </td>
+              <td>
+                <div><?= e($o['order_type']) ?></div>
+                <?php if ($o['table_number']): ?><div class="table__secondary">Table <?= e($o['table_number']) ?></div><?php endif; ?>
+              </td>
+              <td class="table__secondary truncate" style="max-width:260px"><?= e($o['items_summary'] ?? '—') ?></td>
+              <td class="text-end fw-semi"><?= e(money($o['total_amount'])) ?></td>
+              <td>
+                <span class="badge-soft badge-soft--<?= $o['status'] === 'Completed' ? 'ok' : 'bad' ?>"><?= e($o['status']) ?></span>
+              </td>
+              <td>
+                <span class="badge-soft badge-soft--<?= $o['payment_status'] === 'Paid' ? 'ok' : ($o['payment_status'] === 'Partially Paid' ? 'warn' : 'bad') ?>">
+                  <?= e($o['payment_status']) ?>
+                </span>
+              </td>
+              <td class="table__secondary"><?= e(date('j M Y, H:i', strtotime((string) $o['updated_at']))) ?></td>
+              <td class="text-end">
+                <a class="btn btn-ghost btn-icon btn-sm" href="<?= url('receipt.php?id=' . (int) $o['id']) ?>" title="Receipt">
+                  <i class="bi bi-receipt"></i>
+                </a>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+</div>
 
-  <?php include "library/footer.php"; ?>
-  <?php include "library/script.php"; ?>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+<?php include __DIR__ . '/includes/layout/app_end.php'; ?>

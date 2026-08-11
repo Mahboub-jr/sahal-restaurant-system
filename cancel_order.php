@@ -1,20 +1,13 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Retired. Cancelling an order mutated status over a plain GET link
+ * (AUDIT.md E5 -- fireable by a crawler or a prefetching browser). The
+ * Orders page now posts to actions/orders.php (do=set_status) instead.
+ * Kept as a redirect so old bookmarks or links do not 404.
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_login();
 
-if (isset($_GET['id'])) {
-    $id = intval($_GET['id']);
-    
-    $query = "UPDATE orders SET status = 'Cancelled' WHERE id = $id";
-
-    if (mysqli_query($conn, $query)) {
-        header("Location: orders.php?msg=cancelled");
-        exit();
-    } else {
-        echo "Error updating order: " . mysqli_error($conn);
-    }
-} else {
-    echo "Invalid order ID.";
-}
-?>
+flash_info('Use the status buttons on the Orders page to cancel an order.');
+redirect('orders.php');
