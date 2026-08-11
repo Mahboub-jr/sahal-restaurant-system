@@ -1,140 +1,176 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Menu categories -- full CRUD.
+ *
+ * This page only READS and RENDERS. Every write goes to
+ * actions/categories.php.
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin', 'manager');
 
-// Handle form submission (Add Category)
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_category'])) {
-    $name = mysqli_real_escape_string($conn, $_POST['name']);
-    $desc = mysqli_real_escape_string($conn, $_POST['description']);
-    $now = date('Y-m-d H:i:s');
+$title    = 'Categories';
+$subtitle = 'How the menu is organised';
 
-    $insert = "INSERT INTO categories (name, description, created_at) VALUES ('$name', '$desc', '$now')";
-    mysqli_query($conn, $insert);
-    header("Location: categories.php");
-    exit();
-}
+$categories = db_all(
+    'SELECT c.*, COUNT(m.id) AS item_count
+       FROM categories c
+       LEFT JOIN menu_items m ON m.category_id = c.id
+      GROUP BY c.id
+      ORDER BY c.name'
+);
 
-// Handle delete
-// Migration 002 adds fk_menu_items_category with ON DELETE RESTRICT, so this
-// DELETE now FAILS when the category still holds menu items instead of
-// silently orphaning them (which is how 'bariis' became unmanageable --
-// see AUDIT-ADDENDUM.md BUG-2). Report that refusal clearly.
-if (isset($_GET['delete'])) {
-    $id = intval($_GET['delete']);
-
-    $inUse = mysqli_fetch_assoc(mysqli_query(
-        $conn,
-        "SELECT COUNT(*) AS c FROM menu_items WHERE category_id = $id"
-    ))['c'] ?? 0;
-
-    if ($inUse > 0) {
-        $delete_error = "This category cannot be deleted: {$inUse} menu item(s) "
-                      . "still belong to it. Reassign or remove those items first.";
-    } elseif (mysqli_query($conn, "DELETE FROM categories WHERE id = $id")) {
-        header("Location: categories.php?msg=deleted");
-        exit();
-    } else {
-        $delete_error = "Could not delete this category: " . mysqli_error($conn);
-    }
-}
-
-// Fetch all categories
-$categories = mysqli_query($conn, "SELECT * FROM categories ORDER BY created_at DESC");
+include __DIR__ . '/includes/layout/app_start.php';
 ?>
 
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Manage Categories</title>
-    <link rel="stylesheet" href="css/main.css">
-    <?php include "library/head.php"; ?>
-</head>
-<body class="app sidebar-mini">
-<?php include "library/sidebar.php"; ?>
-<?php include "library/header.php"; ?>
+<div class="page-head">
+  <div>
+    <h1 class="page-head__title">Categories</h1>
+    <p class="page-head__sub"><?= count($categories) ?> categor<?= count($categories) === 1 ? 'y' : 'ies' ?></p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn-outline-secondary" href="<?= url('menu.php') ?>">
+      <i class="bi bi-egg-fried"></i> Menu items
+    </a>
+    <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#categoryModal">
+      <i class="bi bi-plus-lg"></i> Add category
+    </button>
+  </div>
+</div>
 
-<main class="app-content">
-    <div class="app-title">
-        <div>
-            <h1><i class="bi bi-tags"></i> Manage Categories</h1>
-            <p>View, add, and delete menu categories</p>
-        </div>
+<div class="card">
+  <?php if ($categories === []): ?>
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty__icon"><i class="bi bi-tags"></i></div>
+        <div class="empty__title">No categories yet</div>
+        <p class="empty__text">Add the first one and it will show up when adding a menu item.</p>
+      </div>
     </div>
-
-    <?php if (!empty($delete_error)): ?>
-        <div class="alert alert-warning">
-            <i class="bi bi-exclamation-triangle me-2"></i><?= htmlspecialchars($delete_error) ?>
-        </div>
-    <?php endif; ?>
-    <?php if (isset($_GET['msg']) && $_GET['msg'] === 'deleted'): ?>
-        <div class="alert alert-success">Category deleted.</div>
-    <?php endif; ?>
-
-    <div class="row">
-        <!-- Add Category Form -->
-        <div class="col-md-4">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white">Add New Category</div>
-                <div class="card-body">
-                    <form method="POST">
-                        <div class="mb-3">
-                            <label class="form-label">Category Name</label>
-                            <input type="text" name="name" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Description</label>
-                            <textarea name="description" class="form-control" rows="3" required></textarea>
-                        </div>
-                        <button type="submit" name="add_category" class="btn btn-primary w-100">Add Category</button>
-                    </form>
+  <?php else: ?>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th class="text-center">Items</th>
+            <th style="width:100px" class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($categories as $c): ?>
+            <tr>
+              <td class="table__primary"><?= e($c['name']) ?></td>
+              <td class="table__secondary"><?= e($c['description'] ?? '—') ?></td>
+              <td class="text-center"><?= (int) $c['item_count'] ?></td>
+              <td>
+                <div class="table__actions justify-content-end">
+                  <button class="btn btn-ghost btn-icon btn-sm js-edit" type="button" title="Edit"
+                          data-category='<?= e(json_encode([
+                              'id'          => (int) $c['id'],
+                              'name'        => $c['name'],
+                              'description' => $c['description'],
+                          ], JSON_UNESCAPED_UNICODE)) ?>'>
+                    <i class="bi bi-pencil"></i>
+                  </button>
+                  <form method="post" action="<?= url('actions/categories.php') ?>" class="m-0"
+                        data-confirm="Delete “<?= e($c['name']) ?>”?<?= $c['item_count'] > 0 ? ' It still has ' . (int) $c['item_count'] . ' menu item(s) on it, so this will be refused.' : '' ?>">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="do" value="delete">
+                    <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
+                    <button class="btn btn-ghost btn-icon btn-sm" type="submit" title="Delete" style="color:var(--bad)">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </form>
                 </div>
-            </div>
-        </div>
-
-        <!-- Category List -->
-        <div class="col-md-8">
-            <div class="card shadow-sm">
-                <div class="card-header bg-success text-white">Category List</div>
-                <div class="card-body">
-                    <table class="table table-bordered table-hover">
-                        <thead class="table-light">
-                            <tr>
-                                <th>#</th>
-                                <th>Name</th>
-                                <th>Description</th>
-                                <th>Created At</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php
-                        $i = 1;
-                        while ($cat = mysqli_fetch_assoc($categories)) {
-                            echo "<tr>
-                                <td>{$i}</td>
-                                <td>" . htmlspecialchars($cat['name']) . "</td>
-                                <td>" . htmlspecialchars((string) $cat['description']) . "</td>
-                                <td>" . htmlspecialchars((string) $cat['created_at']) . "</td>
-                                <td>
-                                    <a href='?delete={$cat['id']}' class='btn btn-sm btn-danger' onclick=\"return confirm('Delete this category?')\">Delete</a>
-                                </td>
-                            </tr>";
-                            $i++;
-                        }
-                        ?>
-                        </tbody>
-                    </table>
-                    <?php if (mysqli_num_rows($categories) == 0): ?>
-                        <p class="text-muted text-center">No categories yet.</p>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
     </div>
-</main>
+  <?php endif; ?>
+</div>
 
-<?php include "library/footer.php"; ?>
-<?php include "library/script.php"; ?>
-</body>
-</html>
+<!-- ============ Add / edit modal ============ -->
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="<?= url('actions/categories.php') ?>" id="categoryForm">
+        <?= csrf_field() ?>
+        <input type="hidden" name="do" value="create" id="formAction">
+        <input type="hidden" name="id" value="" id="formId">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Add category</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label" for="f_name">Name <span style="color:var(--bad)">*</span></label>
+            <input class="form-control" type="text" id="f_name" name="name" maxlength="100" required>
+          </div>
+          <div class="mb-0">
+            <label class="form-label" for="f_description">Description</label>
+            <textarea class="form-control" id="f_description" name="description" rows="3" maxlength="1000"></textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitBtn">
+            <i class="bi bi-check-lg"></i> Save category
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<?php
+$inlineScript = <<<'JS'
+(function () {
+  var modalEl  = document.getElementById('categoryModal');
+  var form     = document.getElementById('categoryForm');
+  var titleEl  = document.getElementById('modalTitle');
+  var actionEl = document.getElementById('formAction');
+  var idEl     = document.getElementById('formId');
+
+  function resetToCreate() {
+    form.reset();
+    actionEl.value = 'create';
+    idEl.value = '';
+    titleEl.textContent = 'Add category';
+  }
+
+  document.querySelectorAll('[data-bs-target="#categoryModal"]').forEach(function (btn) {
+    btn.addEventListener('click', resetToCreate);
+  });
+
+  document.querySelectorAll('.js-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var c;
+      try { c = JSON.parse(btn.getAttribute('data-category')); } catch (e) { return; }
+
+      actionEl.value = 'update';
+      idEl.value = c.id;
+      titleEl.textContent = 'Edit “' + c.name + '”';
+
+      form.querySelector('#f_name').value = c.name || '';
+      form.querySelector('#f_description').value = c.description || '';
+
+      new bootstrap.Modal(modalEl).show();
+    });
+  });
+
+  modalEl.addEventListener('hidden.bs.modal', function () {
+    var btn = document.getElementById('submitBtn');
+    btn.disabled = false;
+    btn.style.opacity = '';
+  });
+})();
+JS;
+
+include __DIR__ . '/includes/layout/app_end.php';
