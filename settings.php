@@ -1,164 +1,182 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Settings -- one row, one form.
+ *
+ * This page only READS and RENDERS. The write goes to actions/settings.php.
+ *
+ * Dropped the old "Theme" select (default/dark/light): it wrote to
+ * settings.theme, but nothing in the app -- old or new -- ever read that
+ * column back. The dark/light toggle actually in use (the moon icon in
+ * the top bar) is a separate, per-browser localStorage preference, not a
+ * restaurant-wide setting.
+ */
 
-session_start();
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin');
 
-// Fetch settings
-$settings = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM settings LIMIT 1"));
+$title    = 'Settings';
+$subtitle = 'Restaurant profile, invoicing and opening hours';
 
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  $restaurant_name     = mysqli_real_escape_string($conn, $_POST['restaurant_name']);
-  $address             = mysqli_real_escape_string($conn, $_POST['address']);
-  $phone               = mysqli_real_escape_string($conn, $_POST['phone']);
-  $email               = mysqli_real_escape_string($conn, $_POST['email']);
-  $tax_rate            = floatval($_POST['tax_rate']);
-  $service_charge      = floatval($_POST['service_charge']);
-  $currency_symbol     = mysqli_real_escape_string($conn, $_POST['currency_symbol']);
-  $invoice_prefix      = mysqli_real_escape_string($conn, $_POST['invoice_prefix']);
-  $show_logo_on_invoice = isset($_POST['show_logo_on_invoice']) ? 1 : 0;
-  $invoice_footer_note = mysqli_real_escape_string($conn, $_POST['invoice_footer_note']);
-  $theme               = mysqli_real_escape_string($conn, $_POST['theme']);
-
-  // Prepare JSON opening hours
-  $days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  $hours = [];
-  foreach ($days as $day) {
-    $hours[$day] = $_POST['opening_hours'][$day] ?? '';
-  }
-  $opening_hours_json = json_encode($hours);
-
-  // Update settings
-  $sql = "UPDATE settings SET
-            restaurant_name = '$restaurant_name',
-            address = '$address',
-            phone = '$phone',
-            email = '$email',
-            tax_rate = $tax_rate,
-            service_charge = $service_charge,
-            currency_symbol = '$currency_symbol',
-            invoice_prefix = '$invoice_prefix',
-            show_logo_on_invoice = $show_logo_on_invoice,
-            invoice_footer_note = '$invoice_footer_note',
-            theme = '$theme',
-            opening_hours = '$opening_hours_json'
-          WHERE id = {$settings['id']}";
-
-  mysqli_query($conn, $sql);
-  header("Location: settings.php?msg=updated");
-  exit();
+$settings = db_one('SELECT * FROM settings ORDER BY id LIMIT 1');
+if ($settings === null) {
+    flash_error('No settings row exists. Check the settings table.');
+    redirect('index.php');
 }
 
-$opening_hours = json_decode($settings['opening_hours'], true);
+$openingHours = json_decode((string) $settings['opening_hours'], true);
+if (!is_array($openingHours)) {
+    $openingHours = [];
+}
+$days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+$logoUrl = upload_url($settings['logo'], 'settings');
+
+include __DIR__ . '/includes/layout/app_start.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <title>Settings</title>
-  <link rel="stylesheet" href="css/main.css">
-  <?php include "library/head.php"; ?>
-</head>
-<body class="app sidebar-mini">
-<?php include "library/header.php"; ?>
-<?php include "library/sidebar.php"; ?>
-
-<main class="app-content">
-  <div class="app-title">
-    <h1><i class="bi bi-gear me-2"></i> Restaurant Settings</h1>
+<div class="page-head">
+  <div>
+    <h1 class="page-head__title">Settings</h1>
   </div>
+</div>
 
-  <?php if (isset($_GET['msg']) && $_GET['msg'] === 'updated'): ?>
-    <div class="alert alert-success">Settings updated successfully.</div>
-  <?php endif; ?>
+<form method="post" action="<?= url('actions/settings.php') ?>" enctype="multipart/form-data">
+  <?= csrf_field() ?>
 
-  <div class="row">
-    <div class="col-md-10 offset-md-1">
-      <form method="POST">
-        <div class="card">
-          <div class="card-header bg-primary text-white">General Info</div>
-          <div class="card-body">
-            <div class="mb-3">
-              <label>Restaurant Name</label>
-              <input type="text" name="restaurant_name" class="form-control" value="<?= htmlspecialchars($settings['restaurant_name']) ?>" required>
-            </div>
-            <div class="mb-3">
-              <label>Address</label>
-              <textarea name="address" class="form-control" required><?= htmlspecialchars($settings['address']) ?></textarea>
-            </div>
-            <div class="mb-3">
-              <label>Phone</label>
-              <input type="text" name="phone" class="form-control" value="<?= htmlspecialchars($settings['phone']) ?>" required>
-            </div>
-            <div class="mb-3">
-              <label>Email</label>
-              <input type="email" name="email" class="form-control" value="<?= htmlspecialchars($settings['email']) ?>" required>
-            </div>
-          </div>
+  <div class="card mb-3">
+    <div class="card-header"><h2>General</h2></div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="f_name">Restaurant name <span style="color:var(--bad)">*</span></label>
+          <input class="form-control" type="text" id="f_name" name="restaurant_name" maxlength="255"
+                 value="<?= e($settings['restaurant_name']) ?>" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="f_phone">Phone</label>
+          <input class="form-control" type="text" id="f_phone" name="phone" maxlength="50" value="<?= e($settings['phone']) ?>">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="f_email">Email</label>
+          <input class="form-control" type="email" id="f_email" name="email" maxlength="100" value="<?= e($settings['email']) ?>">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="f_address">Address</label>
+          <textarea class="form-control" id="f_address" name="address" rows="1"><?= e($settings['address']) ?></textarea>
         </div>
 
-        <div class="card mt-4">
-          <div class="card-header bg-info text-white">Opening Hours</div>
-          <div class="card-body">
-            <?php foreach (['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] as $day): ?>
-              <div class="mb-2 row">
-                <label class="col-sm-2 col-form-label"><?= $day ?></label>
-                <div class="col-sm-10">
-                  <input type="text" name="opening_hours[<?= $day ?>]" class="form-control" value="<?= htmlspecialchars($opening_hours[$day] ?? '') ?>" placeholder=" 9:00 AM - 9:00 PM">
-                </div>
+        <div class="col-12">
+          <label class="form-label" for="f_logo">Logo</label>
+          <div class="d-flex align-items-start gap-3">
+            <div style="position:relative;flex-shrink:0">
+              <img id="logoPreview" src="<?= e($logoUrl ?? '') ?>" alt=""
+                   style="<?= $logoUrl === null ? 'display:none;' : '' ?>width:88px;height:88px;object-fit:cover;border-radius:var(--radius);border:1px solid var(--border)">
+              <div data-preview-placeholder
+                   style="<?= $logoUrl !== null ? 'display:none;' : '' ?>width:88px;height:88px;border-radius:var(--radius);border:1px dashed var(--border-strong);display:grid;place-items:center;color:var(--text-subtle)">
+                <i class="bi bi-image" style="font-size:1.4rem"></i>
               </div>
-            <?php endforeach; ?>
-          </div>
-        </div>
-
-        <div class="card mt-4">
-          <div class="card-header bg-secondary text-white">Invoice & Theme</div>
-          <div class="card-body">
-            <div class="mb-3">
-              <label>Tax Rate (%)</label>
-              <input type="number" step="0.01" name="tax_rate" class="form-control" value="<?= $settings['tax_rate'] ?>">
             </div>
-            <div class="mb-3">
-              <label>Service Charge (%)</label>
-              <input type="number" step="0.01" name="service_charge" class="form-control" value="<?= $settings['service_charge'] ?>">
-            </div>
-            <div class="mb-3">
-              <label>Currency Symbol</label>
-              <input type="text" name="currency_symbol" class="form-control" value="<?= htmlspecialchars($settings['currency_symbol']) ?>">
-            </div>
-            <div class="mb-3">
-              <label>Invoice Prefix</label>
-              <input type="text" name="invoice_prefix" class="form-control" value="<?= htmlspecialchars($settings['invoice_prefix']) ?>">
-            </div>
-            <div class="mb-3 form-check">
-              <input type="checkbox" name="show_logo_on_invoice" class="form-check-input" <?= $settings['show_logo_on_invoice'] ? 'checked' : '' ?>>
-              <label class="form-check-label">Show Logo on Invoice</label>
-            </div>
-            <div class="mb-3">
-              <label>Invoice Footer Note</label>
-              <textarea name="invoice_footer_note" class="form-control"><?= htmlspecialchars($settings['invoice_footer_note']) ?></textarea>
-            </div>
-            <div class="mb-3">
-              <label>Theme</label>
-              <select name="theme" class="form-select">
-                <option value="default" <?= $settings['theme'] === 'default' ? 'selected' : '' ?>>Default</option>
-                <option value="dark" <?= $settings['theme'] === 'dark' ? 'selected' : '' ?>>Dark</option>
-                <option value="light" <?= $settings['theme'] === 'light' ? 'selected' : '' ?>>Light</option>
-              </select>
+            <div class="flex-fill">
+              <input class="form-control" type="file" id="f_logo" name="logo"
+                     accept="image/jpeg,image/png,image/gif,image/webp" data-preview="#logoPreview">
+              <div class="form-hint">Shown on the invoice when "Show logo on invoice" is checked below.</div>
+              <input type="hidden" name="remove_logo" value="0" id="formRemoveLogo">
+              <button type="button" class="btn btn-ghost btn-sm mt-2 <?= $logoUrl === null ? 'd-none' : '' ?>"
+                      id="removeLogoBtn" style="color:var(--bad)">
+                <i class="bi bi-trash"></i> Remove current logo
+              </button>
             </div>
           </div>
         </div>
-
-        <div class="mt-3 d-grid">
-          <button type="submit" class="btn btn-success"><i class="bi bi-save me-2"></i>Save Settings</button>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
-</main>
 
-<?php include "library/footer.php"; ?>
-<?php include "library/script.php"; ?>
-</body>
-</html>
+  <div class="card mb-3">
+    <div class="card-header"><h2>Opening hours</h2></div>
+    <div class="card-body">
+      <div class="row g-2">
+        <?php foreach ($days as $day): ?>
+          <div class="col-md-6">
+            <label class="form-label" for="hours_<?= e($day) ?>"><?= e($day) ?></label>
+            <input class="form-control" type="text" id="hours_<?= e($day) ?>"
+                   name="opening_hours[<?= e($day) ?>]" value="<?= e($openingHours[$day] ?? '') ?>"
+                   placeholder="9:00 AM – 9:00 PM">
+          </div>
+        <?php endforeach; ?>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header"><h2>Invoicing</h2></div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="f_tax">Tax rate (%)</label>
+          <input class="form-control" type="number" id="f_tax" name="tax_rate" step="0.01" min="0" max="100"
+                 value="<?= e($settings['tax_rate']) ?>">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="f_service">Service charge (%)</label>
+          <input class="form-control" type="number" id="f_service" name="service_charge" step="0.01" min="0" max="100"
+                 value="<?= e($settings['service_charge']) ?>">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="f_currency">Currency symbol</label>
+          <input class="form-control" type="text" id="f_currency" name="currency_symbol" maxlength="10"
+                 value="<?= e($settings['currency_symbol']) ?>">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="f_prefix">Invoice number prefix</label>
+          <input class="form-control" type="text" id="f_prefix" name="invoice_prefix" maxlength="20"
+                 value="<?= e($settings['invoice_prefix']) ?>">
+          <div class="form-hint">Order invoices use their own order number, not this -- this is here for a future dedicated invoice sequence.</div>
+        </div>
+        <div class="col-md-6 d-flex align-items-end">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="f_show_logo" name="show_logo_on_invoice"
+                   value="1" <?= $settings['show_logo_on_invoice'] ? 'checked' : '' ?>>
+            <label class="form-check-label" for="f_show_logo">Show logo on invoice</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="f_footer">Invoice footer note</label>
+          <textarea class="form-control" id="f_footer" name="invoice_footer_note" rows="2"
+                    maxlength="255"><?= e($settings['invoice_footer_note']) ?></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">
+    <i class="bi bi-check-lg"></i> Save settings
+  </button>
+</form>
+
+<?php
+$inlineScript = <<<'JS'
+(function () {
+  var removeBtn = document.getElementById('removeLogoBtn');
+  var removeEl  = document.getElementById('formRemoveLogo');
+  var preview   = document.getElementById('logoPreview');
+  var placeholder = document.querySelector('[data-preview-placeholder]');
+  var fileInput = document.getElementById('f_logo');
+
+  removeBtn.addEventListener('click', function () {
+    removeEl.value = '1';
+    fileInput.value = '';
+    preview.style.display = 'none';
+    if (placeholder) placeholder.style.display = '';
+    removeBtn.classList.add('d-none');
+  });
+
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files && fileInput.files[0]) {
+      removeEl.value = '0';
+    }
+  });
+})();
+JS;
+
+include __DIR__ . '/includes/layout/app_end.php';

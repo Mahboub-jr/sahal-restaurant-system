@@ -30,8 +30,6 @@ require_once __DIR__ . '/bootstrap.php';
 $legacyAccess = [
     'reports.php'           => ['admin', 'manager'],
     'export_report.php'     => ['admin', 'manager'],
-
-    'settings.php'          => ['admin'],
 ];
 
 $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
