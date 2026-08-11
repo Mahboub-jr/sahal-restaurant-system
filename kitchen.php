@@ -48,16 +48,44 @@ $orders = db_all(
       ORDER BY o.created_at ASC"
 );
 
+$hasAvailability = db_value(
+    "SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'menu_items' AND COLUMN_NAME = 'is_available'",
+    [DB_NAME]
+) !== null;
+
 $lines = [];
 if ($orders !== []) {
     $ids          = array_column($orders, 'id');
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     foreach (db_all(
-        "SELECT order_id, item_name, quantity, notes FROM order_items
+        "SELECT order_id, menu_item_id, item_name, quantity, notes FROM order_items
           WHERE order_id IN ($placeholders) ORDER BY id",
         $ids
     ) as $line) {
         $lines[(int) $line['order_id']][] = $line;
+    }
+}
+
+// Availability of every menu item that appears on a ticket right now, so
+// the 86 button knows whether to offer "mark unavailable" or just show
+// that it already is.
+$availableById = [];
+if ($hasAvailability) {
+    $menuItemIds = [];
+    foreach ($lines as $orderLines) {
+        foreach ($orderLines as $l) {
+            if ($l['menu_item_id'] !== null) {
+                $menuItemIds[(int) $l['menu_item_id']] = true;
+            }
+        }
+    }
+    if ($menuItemIds !== []) {
+        $ids2 = array_keys($menuItemIds);
+        $ph2  = implode(',', array_fill(0, count($ids2), '?'));
+        foreach (db_all("SELECT id, is_available FROM menu_items WHERE id IN ($ph2)", $ids2) as $m) {
+            $availableById[(int) $m['id']] = (int) $m['is_available'] === 1;
+        }
     }
 }
 
@@ -121,10 +149,33 @@ $columnMeta = [
 
                 <ul class="list-unstyled mb-2" style="font-size:.875rem">
                   <?php foreach ($lines[(int) $o['id']] ?? [] as $l): ?>
-                    <li>
-                      <span class="fw-semi"><?= (int) $l['quantity'] ?>×</span> <?= e($l['item_name']) ?>
-                      <?php if (!empty($l['notes'])): ?>
-                        <div class="table__secondary" style="padding-left:1.2rem">Note: <?= e($l['notes']) ?></div>
+                    <?php
+                    $menuItemId = $l['menu_item_id'] !== null ? (int) $l['menu_item_id'] : null;
+                    $isAvailable = $menuItemId !== null ? ($availableById[$menuItemId] ?? true) : null;
+                    ?>
+                    <li class="d-flex justify-content-between align-items-start gap-2 mb-1">
+                      <div>
+                        <span class="fw-semi"><?= (int) $l['quantity'] ?>×</span> <?= e($l['item_name']) ?>
+                        <?php if (!empty($l['notes'])): ?>
+                          <div class="table__secondary" style="padding-left:1.2rem">Note: <?= e($l['notes']) ?></div>
+                        <?php endif; ?>
+                      </div>
+                      <?php if ($hasAvailability && $menuItemId !== null): ?>
+                        <?php if ($isAvailable): ?>
+                          <form method="post" action="<?= url('actions/menu.php') ?>" class="m-0 flex-shrink-0"
+                                data-confirm="Mark “<?= e($l['item_name']) ?>” unavailable? It stops appearing on new orders immediately.">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="do" value="toggle">
+                            <input type="hidden" name="redirect" value="kitchen.php">
+                            <input type="hidden" name="id" value="<?= $menuItemId ?>">
+                            <button type="submit" class="btn btn-ghost btn-icon btn-sm" style="color:var(--bad)"
+                                    title="86 this item (mark unavailable on the menu)">
+                              <i class="bi bi-slash-circle"></i>
+                            </button>
+                          </form>
+                        <?php else: ?>
+                          <span class="badge-soft badge-soft--bad flex-shrink-0" style="font-size:.7rem">Off menu</span>
+                        <?php endif; ?>
                       <?php endif; ?>
                     </li>
                   <?php endforeach; ?>

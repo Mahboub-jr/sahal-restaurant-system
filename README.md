@@ -87,7 +87,7 @@ behaves:
 | `receipt.php` | Shows subtotal, discount, tax, service charge, total, table, waiter and payment status. Print button works. |
 | `order_history.php` / `cancelled_orders.php` | Completed and Cancelled orders show up here, not on `orders.php`. |
 | `index.php` best sellers | Card should no longer say "Approximate" — quantities are now real. |
-| `kitchen.php` | Three columns: Pending, Preparing, Ready. "Start preparing" / "Mark ready" buttons move a ticket to the next column and disappear once it reaches Ready — completing is still done from `orders.php`, not here. A ticket sitting 10+ minutes in one stage gets a warning-coloured border. The page auto-refreshes every 25 seconds. |
+| `kitchen.php` | Three columns: Pending, Preparing, Ready. "Start preparing" / "Mark ready" buttons move a ticket to the next column and disappear once it reaches Ready — completing is still done from `orders.php`, not here. A ticket sitting 10+ minutes in one stage gets a warning-coloured border. The page auto-refreshes every 25 seconds. Each line item has an 86 button (⊘ icon) that marks that menu item unavailable immediately, so it stops appearing on new orders — click it, then check the same item shows "Off menu" instead of the button, and that it also shows unavailable on `menu.php`. |
 
 Also worth testing:
 
@@ -161,7 +161,9 @@ from Settings, table + waiter attribution, server-side pricing (the client
 can no longer set its own total), status transitions restricted to sane
 moves, and Dine-In orders occupy/free their table automatically. Kitchen
 display added (Pending → Preparing → Ready), sharing the same status-change
-endpoint as Orders.
+endpoint as Orders. Chef can 86 an item straight from a ticket, which flips
+its menu availability immediately (reuses the existing toggle from Menu
+items, scoped to that one action only).
 
 **Next** — payments (including the BUG-5 duplicate-payment guard), inventory,
 reservations, then converting the remaining pages to the new layout.
