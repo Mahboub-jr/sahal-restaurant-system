@@ -1,106 +1,34 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Retired. Replaced by reservation_slip.php. Kept as a redirect,
+ * translating the old table_bookings id to its migrated reservations id
+ * where possible, so old bookmarks or links do not 404.
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_login();
 
-if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
-    echo "Invalid booking ID.";
-    exit;
+$oldId = query_int('id');
+$hasLegacyTable = db_value(
+    "SELECT 1 FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'table_bookings_legacy'",
+    [DB_NAME]
+) !== null;
+
+if ($hasLegacyTable && $oldId > 0) {
+    $legacy = db_one('SELECT customer_id, table_id, booking_time FROM table_bookings_legacy WHERE id = ?', [$oldId]);
+    if ($legacy !== null) {
+        $reservationId = db_value(
+            'SELECT id FROM reservations
+              WHERE customer_id <=> ? AND table_id <=> ? AND reserved_at = ?
+              LIMIT 1',
+            [$legacy['customer_id'], $legacy['table_id'], $legacy['booking_time']]
+        );
+        if ($reservationId !== null) {
+            redirect('reservation_slip.php?id=' . (int) $reservationId);
+        }
+    }
 }
 
-$id = intval($_GET['id']);
-
-$query = "
-SELECT b.id, b.booking_time, b.status, 
-       c.name AS customer_name, 
-       t.table_number 
-FROM table_bookings b
-JOIN customers c ON b.customer_id = c.id
-JOIN tables t ON b.table_id = t.id
-WHERE b.id = $id";
-
-$result = mysqli_query($conn, $query);
-$booking = mysqli_fetch_assoc($result);
-
-if (!$booking) {
-    echo "Booking not found.";
-    exit;
-}
-?>
-
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Booking Receipt</title>
-    <link rel="stylesheet" href="css/main.css">
-    <?php include "library/head.php"; ?>
-    <style>
-        .receipt-container {
-            max-width: 600px;
-            margin: 50px auto;
-            background: #fdfdfd;
-            padding: 30px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-        }
-        .receipt-header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .receipt-header h2 {
-            margin: 0;
-        }
-        .receipt-body table {
-            width: 100%;
-        }
-    </style>
-</head>
-<body>
-<main class="app-content">
-    <div class="receipt-container shadow">
-        <div class="receipt-header">
-            <h2>Sahal Restaurant</h2>
-            <p class="text-muted">Table Booking Receipt</p>
-        </div>
-        <div class="receipt-body">
-            <table class="table table-bordered">
-                <tr>
-                    <th>Booking ID</th>
-                    <td><?= $booking['id'] ?></td>
-                </tr>
-                <tr>
-                    <th>Customer</th>
-                    <td><?= htmlspecialchars($booking['customer_name']) ?></td>
-                </tr>
-                <tr>
-                    <th>Table Number</th>
-                    <td><?= htmlspecialchars($booking['table_number']) ?></td>
-                </tr>
-                <tr>
-                    <th>Booking Time</th>
-                    <td><?= date("F j, Y, g:i A", strtotime($booking['booking_time'])) ?></td>
-                </tr>
-                <tr>
-                    <th>Status</th>
-                    <td>
-                        <span class="badge 
-                            <?= $booking['status'] == 'Booked' ? 'bg-primary' : 
-                                ($booking['status'] == 'Seated' ? 'bg-success' : 'bg-danger') ?>">
-                            <?= $booking['status'] ?>
-                        </span>
-                    </td>
-                </tr>
-                
-            </table>
-        </div>
-
-        <div class="text-center mt-4">
-            <button onclick="window.print()" class="btn btn-outline-dark">
-                <i class="bi bi-printer"></i> Print Receipt
-            </button>
-            <a href="table_booking.php" class="btn btn-secondary ms-2">Back</a>
-        </div>
-    </div>
-</main>
-</body>
-</html>
+flash_info('Booking receipts are now printed from Reservations.');
+redirect('reservations.php');

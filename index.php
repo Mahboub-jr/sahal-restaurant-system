@@ -167,6 +167,25 @@ arsort($itemCounts);
 $topItems = array_slice($itemCounts, 0, 6, true);
 $topMax   = $topItems === [] ? 1 : max($topItems);
 
+// Low stock and today's reservations -- both optional, added by migration
+// 007. Degrade to an empty list rather than fatal if it has not run yet.
+$hasInventory    = db_value("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'inventory_items'", [DB_NAME]) !== null;
+$hasReservations = db_value("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'reservations'", [DB_NAME]) !== null;
+
+$lowStockItems = $hasInventory
+    ? db_all("SELECT name, unit, quantity_on_hand, reorder_level FROM inventory_items
+                WHERE quantity_on_hand <= reorder_level ORDER BY (quantity_on_hand - reorder_level) LIMIT 6")
+    : [];
+
+$todaysReservations = $hasReservations
+    ? db_all("SELECT r.customer_name, r.party_size, r.reserved_at, r.status, t.table_number
+                FROM reservations r
+                LEFT JOIN tables t ON t.id = r.table_id
+               WHERE DATE(r.reserved_at) = CURDATE()
+                 AND r.status NOT IN ('Cancelled', 'No-show')
+               ORDER BY r.reserved_at ASC")
+    : [];
+
 $pageScripts = ['https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'];
 
 include __DIR__ . '/includes/layout/app_start.php';
@@ -409,6 +428,74 @@ include __DIR__ . '/includes/layout/app_start.php';
     </div>
   </div>
 </div>
+
+<?php if ($hasInventory || $hasReservations): ?>
+<div class="row g-3 mb-4">
+  <?php if ($hasInventory): ?>
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h2>Low stock</h2>
+          <a class="btn btn-ghost btn-sm" href="<?= url('inventory.php') ?>">Inventory <i class="bi bi-arrow-right"></i></a>
+        </div>
+        <div class="card-body">
+          <?php if ($lowStockItems === []): ?>
+            <div class="empty">
+              <div class="empty__icon"><i class="bi bi-box-seam"></i></div>
+              <div class="empty__title">Nothing low</div>
+              <p class="empty__text">Every stock item is above its reorder level.</p>
+            </div>
+          <?php else: ?>
+            <ul class="list-unstyled mb-0">
+              <?php foreach ($lowStockItems as $li): ?>
+                <li class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="fw-semi" style="font-size:.875rem"><?= e($li['name']) ?></span>
+                  <span class="badge-soft badge-soft--warn">
+                    <?= e(number_format((float) $li['quantity_on_hand'], 2)) ?> / <?= e(number_format((float) $li['reorder_level'], 2)) ?> <?= e($li['unit']) ?>
+                  </span>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($hasReservations): ?>
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h2>Today's reservations</h2>
+          <a class="btn btn-ghost btn-sm" href="<?= url('reservations.php') ?>">Reservations <i class="bi bi-arrow-right"></i></a>
+        </div>
+        <div class="card-body">
+          <?php if ($todaysReservations === []): ?>
+            <div class="empty">
+              <div class="empty__icon"><i class="bi bi-journal-bookmark"></i></div>
+              <div class="empty__title">None booked for today</div>
+            </div>
+          <?php else: ?>
+            <ul class="list-unstyled mb-0">
+              <?php foreach ($todaysReservations as $res): ?>
+                <li class="d-flex justify-content-between align-items-center mb-2">
+                  <span style="font-size:.875rem">
+                    <span class="fw-semi"><?= e(date('H:i', strtotime((string) $res['reserved_at']))) ?></span>
+                    · <?= e($res['customer_name']) ?>
+                    <?php if ($res['party_size']): ?>· <?= (int) $res['party_size'] ?><?php endif; ?>
+                    <?php if ($res['table_number']): ?>· Table <?= e($res['table_number']) ?><?php endif; ?>
+                  </span>
+                  <span class="badge-soft badge-soft--info"><?= e($res['status']) ?></span>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+  <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <?php
 $chartData = [

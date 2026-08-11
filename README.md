@@ -41,6 +41,7 @@ them **in order**:
 | `sql/migrations/004_menu_items_availability.sql` | Adds the availability switch |
 | `sql/migrations/005_order_items_and_totals.sql` | Adds `order_items` (real quantities), tax/service charge, table + waiter on orders |
 | `sql/migrations/006_payments_guard.sql` | Tightens `payments` (amount/date/method required, amount must be positive) |
+| `sql/migrations/007_reservations_and_inventory.sql` | Adds `reservations` (replaces `table_bookings`), `inventory_items`, `stock_movements` |
 
 Each file has verification queries at the bottom and a rollback block.
 
@@ -57,6 +58,11 @@ Each file has verification queries at the bottom and a rollback block.
 > **006 does not fix order 19's known double payment** (BUG-5) — it only
 > stops new bad payments going forward. The existing duplicate is left as
 > data for you to review; it will show clearly on `invoice.php?id=19`.
+
+> **Before running 007**, note it renames `table_bookings` to
+> `table_bookings_legacy` and moves its 3 rows into the new `reservations`
+> table. `table_bookings` had no `party_size` column, so those 3 rows get
+> a blank party size — read the "JUDGEMENT CALLS" block for the rest.
 
 ### 4. Open the app
 
@@ -102,6 +108,15 @@ behaves:
 | Duplicate-payment guard | On an order already fully paid, try recording another **Paid** payment — it should be rejected with the balance shown in the error, not silently accepted. Try a **Pending** payment on the same order — that should go through, since Pending doesn't count toward the balance. |
 | `invoice.php?id=<order id>` | Shows line items, subtotal/discount/tax/service/total, then every payment recorded, paid total and balance due. Reachable from `orders.php` (cash icon), `payments.php` (receipt icon), and `receipt.php` ("Invoice" button). |
 | `invoice.php?id=19` | Order 19's known duplicate payment (BUG-5) — should show **paid more than the total**, flagged with a warning banner, not hidden or auto-corrected. |
+
+**After running migration 007**, also check:
+
+| Page | What to look for |
+|---|---|
+| `reservations.php` | The 3 migrated bookings show up (2 Seated, 1 Confirmed), with a blank party size. New reservation: assigning a table should flip that table to **Reserved** on `tables.php`; moving the reservation to **Seated** should flip it to **Occupied**; **Completed** or **Cancelled** should free it back to **Available**. |
+| `inventory.php` | Add an item with a starting quantity — check `stock_movements.php` got a "Received / Initial stock" row for it. Set a reorder level above the quantity and confirm the row highlights and the dashboard's "Low stock" card picks it up. |
+| `stock_movements.php` | Record a "Used" movement larger than what's on hand — it should be rejected rather than taking stock negative. Try a "Correction" — it should require you to pick increase/decrease. There is deliberately no edit or delete here; a mistake gets a new correcting movement, not an edited history. |
+| `index.php` | New "Low stock" and "Today's reservations" cards, only once 007 has run. |
 
 Also worth testing:
 
@@ -183,9 +198,16 @@ payment re-checks the order's remaining balance inside a locked transaction
 automatically, and `invoice.php` shows an order's items, totals and every
 payment against it in one place, replacing the old one-payment-at-a-time
 `receipt_payment.php`.
+Reservations rebuilt on a new `reservations` table (replacing the thin
+`table_bookings`) with party size, notes, a fuller status lifecycle, and
+the same table-status sync orders already use. Inventory built from
+scratch: stock items with a reorder level, and an append-only stock
+movement ledger (no edit or delete on a movement — corrections are new
+rows, never rewritten history). Dashboard gained a low-stock card and a
+today's-reservations card.
 
-**Next** — inventory and reservations (neither exists yet), then converting
-the remaining pages to the new layout.
+**Next** — converting the remaining pages to the new layout, then RBAC
+rollout and polish/testing (see `AUDIT.md`'s Phases 8-10).
 
 See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 
@@ -215,6 +237,14 @@ See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
   `menu_item_id`) drops those specific lines if you save changes — the cart
   can only represent real, priced menu items. `update_order.php` calls this
   out before you save.
+- **Inventory has no link to menu items or orders.** It tracks raw stock
+  (ingredients, supplies) on its own; placing an order does not decrement
+  anything. Wiring a recipe/ingredient list to each menu item so stock
+  depletes automatically is a real feature, not a small addition — it
+  changes what "editing a menu item" means — so it was left out rather than
+  bolted on quickly. Worth a dedicated pass if you want it.
+- **The 3 migrated reservations have no `party_size`.** `table_bookings`
+  never recorded one; the migration leaves it blank rather than guessing.
 
 ---
 

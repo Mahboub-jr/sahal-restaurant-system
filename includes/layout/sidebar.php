@@ -35,8 +35,7 @@ $navSections = [
     ],
     'Front of house' => [
         ['Tables',       'bi-grid-3x3',  'tables.php',        ['admin', 'manager', 'waiter']],
-        ['Bookings',     'bi-calendar2-check', 'table_booking.php', ['admin', 'manager', 'waiter']],
-        ['Reservations', 'bi-journal-bookmark', 'reservations.php', ['admin', 'manager'], true],
+        ['Reservations', 'bi-journal-bookmark', 'reservations.php', ['admin', 'manager', 'waiter', 'cashier']],
         ['Customers',    'bi-people',    'customers.php',     ['admin', 'manager', 'cashier']],
     ],
     'Money' => [
@@ -44,8 +43,8 @@ $navSections = [
         ['Reports',  'bi-bar-chart-line',      'reports.php',  ['admin', 'manager']],
     ],
     'Inventory' => [
-        ['Stock Items',     'bi-box-seam',     'inventory.php',       ['admin', 'manager'], true],
-        ['Stock Movements', 'bi-arrow-left-right', 'stock_movements.php', ['admin', 'manager'], true],
+        ['Stock Items',     'bi-box-seam',     'inventory.php',       ['admin', 'manager']],
+        ['Stock Movements', 'bi-arrow-left-right', 'stock_movements.php', ['admin', 'manager']],
     ],
     'People' => [
         ['Staff',      'bi-person-badge',  'employees.php',         ['admin', 'manager']],

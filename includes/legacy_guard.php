@@ -31,8 +31,6 @@ $legacyAccess = [
     'categories.php'        => ['admin', 'manager'],
 
     'tables.php'            => ['admin', 'manager', 'waiter'],
-    'table_booking.php'     => ['admin', 'manager', 'waiter'],
-    'receipt_booking.php'   => ['admin', 'manager', 'cashier'],
     'customers.php'         => ['admin', 'manager', 'cashier'],
 
     'reports.php'           => ['admin', 'manager'],
