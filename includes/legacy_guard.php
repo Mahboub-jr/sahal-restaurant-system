@@ -30,10 +30,7 @@ require_once __DIR__ . '/bootstrap.php';
 $legacyAccess = [
     'reports.php'           => ['admin', 'manager'],
     'export_report.php'     => ['admin', 'manager'],
-    'export_user_roles.php' => ['admin'],
 
-    'manage_users.php'      => ['admin'],
-    'user_roles.php'        => ['admin'],
     'settings.php'          => ['admin'],
 ];
 

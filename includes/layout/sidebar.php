@@ -50,7 +50,6 @@ $navSections = [
         ['Staff',      'bi-person-badge',  'employees.php',         ['admin', 'manager']],
         ['Attendance', 'bi-calendar-check','attendance.php',        ['admin', 'manager']],
         ['Users',      'bi-shield-lock',   'manage_users.php',      ['admin']],
-        ['Roles',      'bi-diagram-3',     'user_roles.php',        ['admin']],
     ],
     'System' => [
         ['Settings', 'bi-gear', 'settings.php', ['admin']],

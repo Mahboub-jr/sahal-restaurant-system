@@ -1,49 +1,37 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * CSV export of users, optionally filtered by role.
+ *
+ * Replaces the old export_user_roles.php, which had a debug
+ * `echo "TCPDF found!"; exit;` left in it above the real code -- meaning
+ * every request fataled before ever reaching the export logic below it
+ * (a genuine parse error, confirmed with `php -l`). The PDF option pulled
+ * in a 27 MB vendored TCPDF library for a three-column table; dropped in
+ * favour of CSV, which every spreadsheet app already opens, plus the
+ * browser's own print-to-PDF if a PDF file is what's actually wanted.
+ */
 
-include "library/conn.php";
-<?php
-if (file_exists('library/tcpdf/tcpdf.php')) {
-    echo "TCPDF found!";
-} else {
-    echo "TCPDF NOT FOUND!";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin');
+
+$role = one_of(query('role'), array_keys(ROLES), '');
+
+$sql    = 'SELECT name, email, role FROM users';
+$params = [];
+if ($role !== '') {
+    $sql .= ' WHERE role = ?';
+    $params[] = $role;
 }
-exit;
- 
-//require_once 'library/tcpdf/TCPDF-main/tcpdf.php'; // For PDF export
+$sql .= ' ORDER BY id DESC';
 
-$role = isset($_GET['role']) ? mysqli_real_escape_string($conn, $_GET['role']) : '';
-$format = $_GET['format'] ?? 'excel';
+$users = db_all($sql, $params);
 
-$query = "SELECT name, email, role FROM users";
-if ($role) $query .= " WHERE role = '$role'";
-$query .= " ORDER BY id DESC";
+header('Content-Type: text/csv; charset=utf-8');
+header('Content-Disposition: attachment; filename="user_roles.csv"');
 
-$result = mysqli_query($conn, $query);
-
-if ($format == 'excel') {
-  header("Content-Type: application/vnd.ms-excel");
-  header("Content-Disposition: attachment; filename=user_roles.xls");
-
-  echo "Name\tEmail\tRole\n";
-  while ($row = mysqli_fetch_assoc($result)) {
-    echo "{$row['name']}\t{$row['email']}\t{$row['role']}\n";
-  }
-  exit();
+$out = fopen('php://output', 'w');
+fputcsv($out, ['Name', 'Email', 'Role']);
+foreach ($users as $u) {
+    fputcsv($out, [$u['name'], $u['email'], ROLES[$u['role']] ?? $u['role']]);
 }
-
-if ($format == 'pdf') {
-  $pdf = new TCPDF();
-  $pdf->AddPage();
-  $html = '<h3>User Roles Report</h3><table border="1" cellpadding="4"><thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead><tbody>';
-
-  while ($row = mysqli_fetch_assoc($result)) {
-    $html .= "<tr><td>{$row['name']}</td><td>{$row['email']}</td><td>{$row['role']}</td></tr>";
-  }
-
-  $html .= '</tbody></table>';
-  $pdf->writeHTML($html);
-  $pdf->Output('user_roles.pdf', 'D');
-  exit();
-}
-?>
+fclose($out);
