@@ -87,6 +87,7 @@ behaves:
 | `receipt.php` | Shows subtotal, discount, tax, service charge, total, table, waiter and payment status. Print button works. |
 | `order_history.php` / `cancelled_orders.php` | Completed and Cancelled orders show up here, not on `orders.php`. |
 | `index.php` best sellers | Card should no longer say "Approximate" — quantities are now real. |
+| `kitchen.php` | Three columns: Pending, Preparing, Ready. "Start preparing" / "Mark ready" buttons move a ticket to the next column and disappear once it reaches Ready — completing is still done from `orders.php`, not here. A ticket sitting 10+ minutes in one stage gets a warning-coloured border. The page auto-refreshes every 25 seconds. |
 
 Also worth testing:
 
@@ -158,11 +159,12 @@ new design system, login / dashboard / menu rebuilt, auth guards on all pages.
 Orders rebuilt: `order_items` with real quantities, tax/service charge applied
 from Settings, table + waiter attribution, server-side pricing (the client
 can no longer set its own total), status transitions restricted to sane
-moves, and Dine-In orders occupy/free their table automatically.
+moves, and Dine-In orders occupy/free their table automatically. Kitchen
+display added (Pending → Preparing → Ready), sharing the same status-change
+endpoint as Orders.
 
-**Next** — kitchen display, payments (including the BUG-5 duplicate-payment
-guard), inventory, reservations, then converting the remaining pages to the
-new layout.
+**Next** — payments (including the BUG-5 duplicate-payment guard), inventory,
+reservations, then converting the remaining pages to the new layout.
 
 See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 

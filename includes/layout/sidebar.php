@@ -25,7 +25,7 @@ $navSections = [
     'Operations' => [
         ['New Order',      'bi-plus-square',   'place_order.php', ['admin', 'manager', 'cashier', 'waiter']],
         ['Orders',         'bi-receipt',       'orders.php',      ['admin', 'manager', 'cashier', 'waiter']],
-        ['Kitchen',        'bi-fire',          'kitchen.php',     ['admin', 'manager', 'chef'], true],
+        ['Kitchen',        'bi-fire',          'kitchen.php',     ['admin', 'manager', 'chef']],
         ['Order History',  'bi-clock-history', 'order_history.php', ['admin', 'manager', 'cashier']],
         ['Cancelled',      'bi-x-circle',      'cancelled_orders.php', ['admin', 'manager']],
     ],

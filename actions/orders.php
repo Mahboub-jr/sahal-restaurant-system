@@ -334,10 +334,15 @@ if ($do === 'set_status') {
     $id   = post_int('id');
     $next = post('status');
 
+    // Both orders.php and kitchen.php post here; send the user back to
+    // whichever one they came from rather than always landing on orders.php
+    // -- a chef does not have access to that page (see require_role below).
+    $returnTo = one_of(post('redirect'), ['orders.php', 'kitchen.php'], 'orders.php');
+
     $order = db_one('SELECT id, status, table_id FROM orders WHERE id = ?', [$id]);
     if ($order === null) {
         flash_error('That order no longer exists.');
-        redirect('orders.php');
+        redirect($returnTo);
     }
 
     $allowedNext = [
@@ -351,18 +356,19 @@ if ($do === 'set_status') {
     if (!in_array($next, ORDER_STATUSES, true)
         || !in_array($next, $allowedNext[$order['status']] ?? [], true)) {
         flash_error('Order #' . $id . ' cannot move from ' . $order['status'] . ' to ' . $next . '.');
-        redirect('orders.php');
+        redirect($returnTo);
     }
 
     // Cancelling and completing carry more authority than day-to-day
     // progress -- the same split the legacy cancel_order.php /
-    // complete_order.php role lists already enforced.
+    // complete_order.php role lists already enforced. Preparing/Ready are
+    // the kitchen's day-to-day moves, so chef is allowed there too.
     if ($next === 'Cancelled') {
         require_role('admin', 'manager');
     } elseif ($next === 'Completed') {
         require_role('admin', 'manager', 'cashier');
     } else {
-        require_role('admin', 'manager', 'cashier', 'waiter');
+        require_role('admin', 'manager', 'cashier', 'waiter', 'chef');
     }
 
     db_run('UPDATE orders SET status = ? WHERE id = ?', [$next, $id]);
@@ -372,7 +378,7 @@ if ($do === 'set_status') {
     }
 
     flash_success('Order #' . $id . ' is now ' . $next . '.');
-    redirect('orders.php');
+    redirect($returnTo);
 }
 
 flash_error('Unrecognised action.');
