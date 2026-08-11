@@ -1,167 +1,196 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Attendance -- mark and review.
+ *
+ * This page only READS and RENDERS. Every write goes to
+ * actions/attendance.php.
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin', 'manager');
 
-// Record attendance
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_attendance'])) {
-  $employee_id = intval($_POST['employee_id']);
-  $date = $_POST['date'];
-  $status = $_POST['status'];
+$title    = 'Attendance';
+$subtitle = 'Daily presence, one row per employee per day';
 
-  $check = mysqli_query($conn, "SELECT * FROM attendance WHERE employee_id = $employee_id AND date = '$date'");
-  if (mysqli_num_rows($check) == 0) {
-    mysqli_query($conn, "INSERT INTO attendance (employee_id, date, status) VALUES ($employee_id, '$date', '$status')");
-    $message = "Attendance recorded.";
-  } else {
-    $message = "Attendance already marked for this employee on this date.";
-  }
+$employees = db_all('SELECT id, name FROM employees ORDER BY name');
+
+$STATUSES = ['Present', 'Absent', 'Leave'];
+
+$employeeF = query_int('employee_id');
+$statusF   = one_of(query('status'), $STATUSES, '');
+$fromDate  = query('from');
+$toDate    = query('to');
+
+$where  = [];
+$params = [];
+if ($employeeF > 0) {
+    $where[]  = 'a.employee_id = ?';
+    $params[] = $employeeF;
 }
-
-// Filters
-$where = [];
-if (!empty($_GET['employee_id'])) {
-  $employee_id = intval($_GET['employee_id']);
-  $where[] = "a.employee_id = $employee_id";
+if ($statusF !== '') {
+    $where[]  = 'a.status = ?';
+    $params[] = $statusF;
 }
-if (!empty($_GET['status'])) {
-  $status = mysqli_real_escape_string($conn, $_GET['status']);
-  $where[] = "a.status = '$status'";
+if ($fromDate !== '') {
+    $where[]  = 'a.date >= ?';
+    $params[] = $fromDate;
 }
-if (!empty($_GET['from']) && !empty($_GET['to'])) {
-  $from = $_GET['from'];
-  $to = $_GET['to'];
-  $where[] = "a.date BETWEEN '$from' AND '$to'";
+if ($toDate !== '') {
+    $where[]  = 'a.date <= ?';
+    $params[] = $toDate;
 }
+$whereSql = $where === [] ? '' : 'WHERE ' . implode(' AND ', $where);
 
-$where_clause = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-$sql = "SELECT a.*, e.name FROM attendance a JOIN employees e ON a.employee_id = e.id $where_clause ORDER BY a.date DESC";
-$attendance = mysqli_query($conn, $sql);
+$records = db_all(
+    "SELECT a.*, e.name FROM attendance a JOIN employees e ON a.employee_id = e.id $whereSql ORDER BY a.date DESC, e.name LIMIT 300",
+    $params
+);
 
-if (!$attendance) {
-  die("Query Error: " . mysqli_error($conn));
-}
+$statusColour = ['Present' => 'ok', 'Absent' => 'bad', 'Leave' => 'warn'];
 
-$employees = mysqli_query($conn, "SELECT id, name FROM employees ORDER BY name");
+include __DIR__ . '/includes/layout/app_start.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <title>Employee Attendance</title>
-  <link rel="stylesheet" href="css/main.css">
-  <?php include "library/head.php"; ?>
-</head>
-<body class="app sidebar-mini">
-<?php include "library/header.php"; ?>
-<?php include "library/sidebar.php"; ?>
+<div class="page-head">
+  <div>
+    <h1 class="page-head__title">Attendance</h1>
+    <p class="page-head__sub"><?= count($records) ?> record<?= count($records) === 1 ? '' : 's' ?> shown (most recent 300)</p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn-outline-secondary" href="<?= url('attendance_report.php') ?>">
+      <i class="bi bi-graph-up"></i> Report
+    </a>
+    <a class="btn btn-outline-secondary" href="<?= url('employees.php') ?>">
+      <i class="bi bi-person-badge"></i> Staff
+    </a>
+  </div>
+</div>
 
-<main class="app-content">
-  <div class="app-title">
-    <h1><i class="bi bi-calendar-check"></i> Employee Attendance</h1>
+<?php if ($employees === []): ?>
+  <div class="alert alert-warning mb-3">
+    <i class="bi bi-exclamation-triangle"></i>
+    No employees yet — <a href="<?= url('employees.php') ?>">add one</a> before marking attendance.
+  </div>
+<?php endif; ?>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><h2>Mark attendance</h2></div>
+      <div class="card-body">
+        <form method="post" action="<?= url('actions/attendance.php') ?>">
+          <?= csrf_field() ?>
+          <input type="hidden" name="do" value="create">
+          <div class="mb-2">
+            <label class="form-label" for="f_employee">Employee</label>
+            <select class="form-select" id="f_employee" name="employee_id" required>
+              <option value="">Choose…</option>
+              <?php foreach ($employees as $emp): ?>
+                <option value="<?= (int) $emp['id'] ?>"><?= e($emp['name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="f_date">Date</label>
+            <input class="form-control" type="date" id="f_date" name="date" value="<?= e(date('Y-m-d')) ?>" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="f_status">Status</label>
+            <select class="form-select" id="f_status" name="status" required>
+              <option value="Present">Present</option>
+              <option value="Absent">Absent</option>
+              <option value="Leave">Leave</option>
+            </select>
+          </div>
+          <button class="btn btn-primary w-100" type="submit" <?= $employees === [] ? 'disabled' : '' ?>>
+            <i class="bi bi-check-lg"></i> Record
+          </button>
+        </form>
+      </div>
+    </div>
   </div>
 
-  <div class="row">
-    <!-- Attendance Form -->
-    <div class="col-md-4">
-      <div class="card">
-        <div class="card-header bg-success text-white">Mark Attendance</div>
-        <div class="card-body">
-          <?php if (isset($message)): ?>
-            <div class="alert alert-info"><?= $message ?></div>
-          <?php endif; ?>
-          <form method="POST">
-            <div class="mb-3">
-              <label>Employee</label>
-              <select name="employee_id" class="form-select" required>
-                <option value="">-- Select Employee --</option>
-                <?php mysqli_data_seek($employees, 0); while ($emp = mysqli_fetch_assoc($employees)): ?>
-                  <option value="<?= $emp['id'] ?>"><?= htmlspecialchars($emp['name']) ?></option>
-                <?php endwhile; ?>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label>Date</label>
-              <input type="date" name="date" class="form-control" value="<?= date('Y-m-d') ?>" required>
-            </div>
-            <div class="mb-3">
-              <label>Status</label>
-              <select name="status" class="form-select" required>
-                <option value="Present">Present</option>
-                <option value="Absent">Absent</option>
-              </select>
-            </div>
-            <button type="submit" name="mark_attendance" class="btn btn-success w-100">Submit</button>
-          </form>
-        </div>
+  <div class="col-lg-8">
+    <div class="card mb-3">
+      <div class="card-body py-3">
+        <form method="get" class="row g-2 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label" for="employee_id">Employee</label>
+            <select class="form-select" id="employee_id" name="employee_id">
+              <option value="">All</option>
+              <?php foreach ($employees as $emp): ?>
+                <option value="<?= (int) $emp['id'] ?>" <?= $employeeF === (int) $emp['id'] ? 'selected' : '' ?>><?= e($emp['name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="status">Status</label>
+            <select class="form-select" id="status" name="status">
+              <option value="">Any</option>
+              <?php foreach ($STATUSES as $s): ?>
+                <option value="<?= e($s) ?>" <?= $statusF === $s ? 'selected' : '' ?>><?= e($s) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" for="from">From</label>
+            <input class="form-control" type="date" id="from" name="from" value="<?= e($fromDate) ?>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" for="to">To</label>
+            <input class="form-control" type="date" id="to" name="to" value="<?= e($toDate) ?>">
+          </div>
+          <div class="col-md-1">
+            <button class="btn btn-primary w-100" type="submit"><i class="bi bi-search"></i></button>
+          </div>
+        </form>
       </div>
     </div>
 
-    <!-- Attendance Records -->
-    <div class="col-md-8">
-      <div class="card">
-        <div class="card-header bg-info text-white">Attendance Records</div>
-        <div class="card-body table-responsive">
-          <form method="GET" class="row g-2 mb-4">
-            <div class="col-md-4">
-              <select name="employee_id" class="form-select">
-                <option value="">All Employees</option>
-                <?php mysqli_data_seek($employees, 0); while ($emp = mysqli_fetch_assoc($employees)): ?>
-                  <option value="<?= $emp['id'] ?>" <?= isset($_GET['employee_id']) && $_GET['employee_id'] == $emp['id'] ? 'selected' : '' ?>>
-                    <?= htmlspecialchars($emp['name']) ?>
-                  </option>
-                <?php endwhile; ?>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <select name="status" class="form-select">
-                <option value="">All Status</option>
-                <option value="Present" <?= isset($_GET['status']) && $_GET['status'] == 'Present' ? 'selected' : '' ?>>Present</option>
-                <option value="Absent" <?= isset($_GET['status']) && $_GET['status'] == 'Absent' ? 'selected' : '' ?>>Absent</option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <input type="date" name="from" class="form-control" value="<?= $_GET['from'] ?? '' ?>" placeholder="From">
-            </div>
-            <div class="col-md-2">
-              <input type="date" name="to" class="form-control" value="<?= $_GET['to'] ?? '' ?>" placeholder="To">
-            </div>
-            <div class="col-md-2 d-grid">
-              <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> Filter</button>
-            </div>
-          </form>
-
-          <table class="table table-bordered align-middle">
-            <thead class="table-light">
+    <div class="card">
+      <?php if ($records === []): ?>
+        <div class="card-body">
+          <div class="empty">
+            <div class="empty__icon"><i class="bi bi-calendar-check"></i></div>
+            <div class="empty__title">No records match</div>
+          </div>
+        </div>
+      <?php else: ?>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
               <tr>
-                <th>#</th>
                 <th>Employee</th>
                 <th>Date</th>
                 <th>Status</th>
+                <th style="width:60px" class="text-end">Actions</th>
               </tr>
             </thead>
             <tbody>
-              <?php $i = 1; while ($row = mysqli_fetch_assoc($attendance)): ?>
+              <?php foreach ($records as $r): ?>
                 <tr>
-                  <td><?= $i++ ?></td>
-                  <td><?= htmlspecialchars($row['name']) ?></td>
-                  <td><?= $row['date'] ?></td>
-                  <td>
-                    <span class="badge bg-<?= $row['status'] == 'Present' ? 'success' : 'danger' ?>">
-                      <?= $row['status'] ?>
-                    </span>
+                  <td class="table__primary"><?= e($r['name']) ?></td>
+                  <td class="table__secondary"><?= e(date('j M Y', strtotime((string) $r['date']))) ?></td>
+                  <td><span class="badge-soft badge-soft--<?= $statusColour[$r['status']] ?? 'neutral' ?>"><?= e($r['status']) ?></span></td>
+                  <td class="text-end">
+                    <form method="post" action="<?= url('actions/attendance.php') ?>" class="m-0"
+                          data-confirm="Remove this attendance record?">
+                      <?= csrf_field() ?>
+                      <input type="hidden" name="do" value="delete">
+                      <input type="hidden" name="id" value="<?= (int) $r['id'] ?>">
+                      <button class="btn btn-ghost btn-icon btn-sm" type="submit" title="Delete" style="color:var(--bad)">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </form>
                   </td>
                 </tr>
-              <?php endwhile; ?>
+              <?php endforeach; ?>
             </tbody>
           </table>
         </div>
-      </div>
+      <?php endif; ?>
     </div>
   </div>
-</main>
+</div>
 
-<?php include "library/footer.php"; ?>
-<?php include "library/script.php"; ?>
-</body>
-</html>
+<?php include __DIR__ . '/includes/layout/app_end.php'; ?>

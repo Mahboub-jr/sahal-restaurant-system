@@ -1,252 +1,266 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Employees -- full CRUD.
+ *
+ * This page only READS and RENDERS. Every write goes to
+ * actions/employees.php.
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin', 'manager');
 
-// Show message
-$msg = isset($_GET['msg']) ? $_GET['msg'] : '';
-$alert = '';
-if ($msg === 'added') $alert = '<div class="alert alert-success">Employee added successfully!</div>';
-if ($msg === 'deleted') $alert = '<div class="alert alert-danger">Employee deleted successfully!</div>';
-if ($msg === 'updated') $alert = '<div class="alert alert-info">Employee updated successfully!</div>';
+$title    = 'Staff';
+$subtitle = 'Employee records';
 
-// Filter logic
-$where = [];
+$search   = query('name');
+$position = query('position');
+$statusF  = one_of(query('status'), ['Active', 'Inactive'], '');
+$joinFrom = query('join_from');
+$joinTo   = query('join_to');
 
-if (!empty($_GET['name'])) {
-    $name = mysqli_real_escape_string($conn, $_GET['name']);
-    $where[] = "name LIKE '%$name%'";
+$where  = [];
+$params = [];
+if ($search !== '') {
+    $where[]  = 'name LIKE ?';
+    $params[] = '%' . $search . '%';
 }
-if (!empty($_GET['position'])) {
-    $position = mysqli_real_escape_string($conn, $_GET['position']);
-    $where[] = "position LIKE '%$position%'";
+if ($position !== '') {
+    $where[]  = 'position LIKE ?';
+    $params[] = '%' . $position . '%';
 }
-if (!empty($_GET['join_from'])) {
-    $join_from = mysqli_real_escape_string($conn, $_GET['join_from']);
-    $where[] = "join_date >= '$join_from'";
+if ($statusF !== '') {
+    $where[]  = 'status = ?';
+    $params[] = $statusF;
 }
-if (!empty($_GET['join_to'])) {
-    $join_to = mysqli_real_escape_string($conn, $_GET['join_to']);
-    $where[] = "join_date <= '$join_to'";
+if ($joinFrom !== '') {
+    $where[]  = 'join_date >= ?';
+    $params[] = $joinFrom;
 }
-if (!empty($_GET['status'])) {
-    $status = mysqli_real_escape_string($conn, $_GET['status']);
-    $where[] = "status = '$status'";
+if ($joinTo !== '') {
+    $where[]  = 'join_date <= ?';
+    $params[] = $joinTo;
 }
+$whereSql = $where === [] ? '' : 'WHERE ' . implode(' AND ', $where);
 
-$filter_sql = count($where) ? "WHERE " . implode(" AND ", $where) : "";
+$employees = db_all("SELECT * FROM employees $whereSql ORDER BY id DESC", $params);
 
-$employees = mysqli_query($conn, "SELECT * FROM employees $filter_sql ORDER BY id DESC");
-
-// Add employee
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_employee'])) {
-  $name = mysqli_real_escape_string($conn, $_POST['name']);
-  $position = mysqli_real_escape_string($conn, $_POST['position']);
-  $phone = mysqli_real_escape_string($conn, $_POST['phone']);
-  $email = mysqli_real_escape_string($conn, $_POST['email']);
-  $status = mysqli_real_escape_string($conn, $_POST['status']);
-
-  $query = "INSERT INTO employees (name, position, phone, email, status, join_date)
-            VALUES ('$name', '$position', '$phone', '$email', '$status', CURRENT_DATE)";
-
-  mysqli_query($conn, $query);
-  header("Location: employees.php?msg=added");    
-  exit();
-}
-
-// Delete employee
-if (isset($_GET['delete'])) {
-  $id = intval($_GET['delete']);
-  mysqli_query($conn, "DELETE FROM employees WHERE id = $id");
-  header("Location: employees.php?msg=deleted");
-  exit();
-}
-
-// Update employee
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_employee'])) {
-  $id = intval($_POST['employee_id']);
-  $name = mysqli_real_escape_string($conn, $_POST['name']);
-  $position = mysqli_real_escape_string($conn, $_POST['position']);
-  $phone = mysqli_real_escape_string($conn, $_POST['phone']);
-  $email = mysqli_real_escape_string($conn, $_POST['email']);
-  $status = mysqli_real_escape_string($conn, $_POST['status']);
-
-  $query = "UPDATE employees SET 
-              name='$name', 
-              position='$position', 
-              phone='$phone', 
-              email='$email',
-              status='$status'
-            WHERE id = $id";
-  mysqli_query($conn, $query);
-  header("Location: employees.php?msg=updated");
-  exit();
-}
+include __DIR__ . '/includes/layout/app_start.php';
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <title>Employees</title>
-  <link rel="stylesheet" href="css/main.css">
-  <?php include "library/head.php"; ?>
-</head>
-<body class="app sidebar-mini">
-<?php include "library/header.php"; ?>
-<?php include "library/sidebar.php"; ?>
 
-<main class="app-content">
-  <div class="app-title">
-    <h1><i class="bi bi-person-badge"></i> Employees</h1>
+<div class="page-head">
+  <div>
+    <h1 class="page-head__title">Staff</h1>
+    <p class="page-head__sub"><?= count($employees) ?> employee<?= count($employees) === 1 ? '' : 's' ?></p>
   </div>
+  <div class="page-head__actions">
+    <a class="btn btn-outline-secondary" href="<?= url('attendance.php') ?>">
+      <i class="bi bi-calendar-check"></i> Attendance
+    </a>
+    <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#employeeModal">
+      <i class="bi bi-plus-lg"></i> Add employee
+    </button>
+  </div>
+</div>
 
-  <?= $alert ?>
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="name">Name</label>
+        <input class="form-control" type="text" id="name" name="name" value="<?= e($search) ?>">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="position">Position</label>
+        <input class="form-control" type="text" id="position" name="position" value="<?= e($position) ?>">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="status">Status</label>
+        <select class="form-select" id="status" name="status">
+          <option value="">Any</option>
+          <option value="Active" <?= $statusF === 'Active' ? 'selected' : '' ?>>Active</option>
+          <option value="Inactive" <?= $statusF === 'Inactive' ? 'selected' : '' ?>>Inactive</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="join_from">Joined from</label>
+        <input class="form-control" type="date" id="join_from" name="join_from" value="<?= e($joinFrom) ?>">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="join_to">to</label>
+        <input class="form-control" type="date" id="join_to" name="join_to" value="<?= e($joinTo) ?>">
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-search"></i> Filter</button>
+        <?php if ($search !== '' || $position !== '' || $statusF !== '' || $joinFrom !== '' || $joinTo !== ''): ?>
+          <a class="btn btn-ghost btn-sm" href="<?= url('employees.php') ?>"><i class="bi bi-x-lg"></i> Clear</a>
+        <?php endif; ?>
+      </div>
+    </form>
+  </div>
+</div>
 
-  <div class="row">
-    <!-- Add Employee Form -->
-    <div class="col-md-4">
-      <div class="card">
-        <div class="card-header bg-primary text-white">Add Employee</div>
-        <div class="card-body">
-          <form method="POST">
-            <div class="mb-3">
-              <label>Name</label>
-              <input type="text" name="name" class="form-control" required>
-            </div>
-            <div class="mb-3">
-              <label>Position</label>
-              <input type="text" name="position" class="form-control" required>
-            </div>
-            <div class="mb-3">
-              <label>Phone</label>
-              <input type="text" name="phone" class="form-control" required>
-            </div>
-            <div class="mb-3">
-              <label>Email</label>
-              <input type="email" name="email" class="form-control" required>
-            </div>
-            <div class="mb-3">
-              <label>Status</label>
-              <select name="status" class="form-select" required>
-                <option>Active</option>
-                <option>Inactive</option>
-              </select>
-            </div>
-            <button type="submit" name="add_employee" class="btn btn-primary w-100">Add Employee</button>
-          </form>
-        </div>
+<div class="card">
+  <?php if ($employees === []): ?>
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty__icon"><i class="bi bi-person-badge"></i></div>
+        <div class="empty__title">No employees match</div>
+        <p class="empty__text">Add the first one, or try a different filter.</p>
       </div>
     </div>
-
-    <!-- View Employees -->
-    <div class="col-md-8">
-      <div class="card">
-        <div class="card-header bg-info text-white">Employee List</div>
-        <div class="card-body table-responsive">
-          <form method="GET" class="row g-2 mb-4">
-            <div class="col-md-2">
-              <input type="text" name="name" class="form-control" placeholder="Name" value="<?= isset($_GET['name']) ? htmlspecialchars($_GET['name']) : '' ?>">
-            </div>
-            <div class="col-md-2">
-              <input type="text" name="position" class="form-control" placeholder="Position" value="<?= isset($_GET['position']) ? htmlspecialchars($_GET['position']) : '' ?>">
-            </div>
-            <div class="col-md-2">
-              <input type="date" name="join_from" class="form-control" value="<?= isset($_GET['join_from']) ? $_GET['join_from'] : '' ?>">
-            </div>
-            <div class="col-md-2">
-              <input type="date" name="join_to" class="form-control" value="<?= isset($_GET['join_to']) ? $_GET['join_to'] : '' ?>">
-            </div>
-            <div class="col-md-2">
-              <select name="status" class="form-select">
-                <option value="">All Status</option>
-                <option value="Active" <?= (isset($_GET['status']) && $_GET['status'] == 'Active') ? 'selected' : '' ?>>Active</option>
-                <option value="Inactive" <?= (isset($_GET['status']) && $_GET['status'] == 'Inactive') ? 'selected' : '' ?>>Inactive</option>
-              </select>
-            </div>
-            <div class="col-md-2 d-grid">
-              <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> Filter</button>
-            </div>
-          </form>
-
-          <table class="table table-bordered table-hover align-middle">
-            <thead class="table-light">
-              <tr>
-                <th>#</th>
-                <th>Name</th>
-                <th>Position</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php $i = 1; $modals = []; while ($emp = mysqli_fetch_assoc($employees)): ?>
-              <tr>
-                <td><?= $i++ ?></td>
-                <td><?= htmlspecialchars($emp['name']) ?></td>
-                <td><?= htmlspecialchars($emp['position']) ?></td>
-                <td><?= htmlspecialchars($emp['phone']) ?></td>
-                <td><?= htmlspecialchars($emp['email']) ?></td>
-                <td><span class="badge bg-<?= $emp['status'] == 'Active' ? 'success' : 'secondary' ?>"><?= $emp['status'] ?></span></td>
-                <td>
-                  <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editModal<?= $emp['id'] ?>">Edit</button>
-                  <a href="?delete=<?= $emp['id'] ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure to delete this employee?')">Delete</a>
-                </td>
-              </tr>
-              <?php ob_start(); ?>
-              <!-- Edit Modal -->
-              <div class="modal fade" id="editModal<?= $emp['id'] ?>" tabindex="-1">
-                <div class="modal-dialog">
-                  <form method="POST" class="modal-content">
-                    <div class="modal-header">
-                      <h5 class="modal-title">Edit Employee</h5>
-                      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                      <input type="hidden" name="employee_id" value="<?= $emp['id'] ?>">
-                      <div class="mb-3">
-                        <label>Name</label>
-                        <input type="text" name="name" value="<?= htmlspecialchars($emp['name']) ?>" class="form-control" required>
-                      </div>
-                      <div class="mb-3">
-                        <label>Position</label>
-                        <input type="text" name="position" value="<?= htmlspecialchars($emp['position']) ?>" class="form-control" required>
-                      </div>
-                      <div class="mb-3">
-                        <label>Phone</label>
-                        <input type="text" name="phone" value="<?= htmlspecialchars($emp['phone']) ?>" class="form-control" required>
-                      </div>
-                      <div class="mb-3">
-                        <label>Email</label>
-                        <input type="email" name="email" value="<?= htmlspecialchars($emp['email']) ?>" class="form-control" required>
-                      </div>
-                      <div class="mb-3">
-                        <label>Status</label>
-                        <select name="status" class="form-select">
-                          <option <?= $emp['status'] == 'Active' ? 'selected' : '' ?>>Active</option>
-                          <option <?= $emp['status'] == 'Inactive' ? 'selected' : '' ?>>Inactive</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div class="modal-footer">
-                      <button type="submit" name="update_employee" class="btn btn-success">Save Changes</button>
-                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    </div>
+  <?php else: ?>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Position</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>Joined</th>
+            <th>Status</th>
+            <th style="width:100px" class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($employees as $emp): ?>
+            <tr>
+              <td class="table__primary"><?= e($emp['name']) ?></td>
+              <td class="table__secondary"><?= e($emp['position'] ?? '—') ?></td>
+              <td class="table__secondary"><?= e($emp['phone'] ?? '—') ?></td>
+              <td class="table__secondary"><?= e($emp['email'] ?? '—') ?></td>
+              <td class="table__secondary"><?= e(date('j M Y', strtotime((string) $emp['join_date']))) ?></td>
+              <td><span class="badge-soft badge-soft--<?= $emp['status'] === 'Active' ? 'ok' : 'neutral' ?>"><?= e($emp['status']) ?></span></td>
+              <td>
+                <div class="table__actions justify-content-end">
+                  <button class="btn btn-ghost btn-icon btn-sm js-edit" type="button" title="Edit"
+                          data-employee='<?= e(json_encode([
+                              'id'       => (int) $emp['id'],
+                              'name'     => $emp['name'],
+                              'position' => $emp['position'],
+                              'phone'    => $emp['phone'],
+                              'email'    => $emp['email'],
+                              'status'   => $emp['status'],
+                          ], JSON_UNESCAPED_UNICODE)) ?>'>
+                    <i class="bi bi-pencil"></i>
+                  </button>
+                  <form method="post" action="<?= url('actions/employees.php') ?>" class="m-0"
+                        data-confirm="Delete “<?= e($emp['name']) ?>”?">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="do" value="delete">
+                    <input type="hidden" name="id" value="<?= (int) $emp['id'] ?>">
+                    <button class="btn btn-ghost btn-icon btn-sm" type="submit" title="Delete" style="color:var(--bad)">
+                      <i class="bi bi-trash"></i>
+                    </button>
                   </form>
                 </div>
-              </div>
-              <?php $modals[] = ob_get_clean(); ?>
-              <?php endwhile; ?>
-            </tbody>
-          </table>
-          <?php foreach ($modals as $modal) echo $modal; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+</div>
+
+<!-- ============ Add / edit modal ============ -->
+<div class="modal fade" id="employeeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="<?= url('actions/employees.php') ?>" id="employeeForm">
+        <?= csrf_field() ?>
+        <input type="hidden" name="do" value="create" id="formAction">
+        <input type="hidden" name="id" value="" id="formId">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Add employee</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-      </div>
+
+        <div class="modal-body">
+          <div class="row g-2">
+            <div class="col-md-8">
+              <label class="form-label" for="f_name">Name <span style="color:var(--bad)">*</span></label>
+              <input class="form-control" type="text" id="f_name" name="name" maxlength="100" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="f_status">Status</label>
+              <select class="form-select" id="f_status" name="status">
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="f_position">Position <span style="color:var(--bad)">*</span></label>
+              <input class="form-control" type="text" id="f_position" name="position" maxlength="100" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="f_phone">Phone</label>
+              <input class="form-control" type="text" id="f_phone" name="phone" maxlength="20">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="f_email">Email</label>
+              <input class="form-control" type="email" id="f_email" name="email" maxlength="100">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitBtn">
+            <i class="bi bi-check-lg"></i> Save employee
+          </button>
+        </div>
+      </form>
     </div>
   </div>
-</main>
+</div>
 
-<?php include "library/footer.php"; ?>
-<?php include "library/script.php"; ?>
-</body>
-</html>
+<?php
+$inlineScript = <<<'JS'
+(function () {
+  var modalEl  = document.getElementById('employeeModal');
+  var form     = document.getElementById('employeeForm');
+  var titleEl  = document.getElementById('modalTitle');
+  var actionEl = document.getElementById('formAction');
+  var idEl     = document.getElementById('formId');
+
+  function resetToCreate() {
+    form.reset();
+    actionEl.value = 'create';
+    idEl.value = '';
+    titleEl.textContent = 'Add employee';
+  }
+
+  document.querySelectorAll('[data-bs-target="#employeeModal"]').forEach(function (btn) {
+    btn.addEventListener('click', resetToCreate);
+  });
+
+  document.querySelectorAll('.js-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var emp;
+      try { emp = JSON.parse(btn.getAttribute('data-employee')); } catch (e) { return; }
+
+      actionEl.value = 'update';
+      idEl.value = emp.id;
+      titleEl.textContent = 'Edit “' + emp.name + '”';
+
+      form.querySelector('#f_name').value = emp.name || '';
+      form.querySelector('#f_position').value = emp.position || '';
+      form.querySelector('#f_phone').value = emp.phone || '';
+      form.querySelector('#f_email').value = emp.email || '';
+      form.querySelector('#f_status').value = emp.status || 'Active';
+
+      new bootstrap.Modal(modalEl).show();
+    });
+  });
+
+  modalEl.addEventListener('hidden.bs.modal', function () {
+    var btn = document.getElementById('submitBtn');
+    btn.disabled = false;
+    btn.style.opacity = '';
+  });
+})();
+JS;
+
+include __DIR__ . '/includes/layout/app_end.php';

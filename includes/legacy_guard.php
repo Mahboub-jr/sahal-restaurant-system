@@ -32,10 +32,6 @@ $legacyAccess = [
     'export_report.php'     => ['admin', 'manager'],
     'export_user_roles.php' => ['admin'],
 
-    'employees.php'         => ['admin', 'manager'],
-    'attendance.php'        => ['admin', 'manager'],
-    'attendance_report.php' => ['admin', 'manager'],
-
     'manage_users.php'      => ['admin'],
     'user_roles.php'        => ['admin'],
     'settings.php'          => ['admin'],
