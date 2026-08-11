@@ -1,280 +1,377 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * Payments -- record and review, one order at a time.
+ *
+ * This page only READS and RENDERS. actions/payments.php does every write,
+ * including the duplicate-payment guard that stops a second payment being
+ * recorded once an order's balance reaches zero (AUDIT-ADDENDUM.md BUG-5).
+ */
 
-include "library/conn.php";
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin', 'manager', 'cashier');
 
-// Add Payment
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_payment'])) {
-    $order_id = intval($_POST['order_id']);
-    $customer_id = intval($_POST['customer_id']);
-    $amount = floatval($_POST['amount']);
-    $payment_date = mysqli_real_escape_string($conn, $_POST['payment_date']);
-    $method = mysqli_real_escape_string($conn, $_POST['payment_method']);
-    $status = mysqli_real_escape_string($conn, $_POST['status']);
+$title    = 'Payments';
+$subtitle = 'Record and review payments against orders';
 
-    mysqli_query($conn, "INSERT INTO payments (order_id, customer_id, amount, payment_date, payment_method, status) 
-                         VALUES ($order_id, $customer_id, $amount, '$payment_date', '$method', '$status')");
+$focusOrderId = query_int('order_id');
 
-                         if ($_POST['status'] === 'Paid') {
-                            mysqli_query($conn, "UPDATE orders SET status = 'completed' WHERE id = $order_id");
-                        }
-    header("Location: payments.php?msg=added");
-    exit();
+$PAYMENT_METHODS = ['Cash', 'Card', 'Mobile Money'];
+$PAYMENT_STATUSES = ['Paid', 'Pending'];
+
+/* --- Orders available to pay against --------------------------------- */
+$payableOrders = db_all(
+    "SELECT o.id, o.order_number, o.customer_name, o.total_amount,
+            COALESCE((SELECT SUM(amount) FROM payments WHERE order_id = o.id AND status = 'Paid'), 0) AS paid_sum
+       FROM orders o
+      WHERE o.status <> 'Cancelled'
+      ORDER BY o.created_at DESC"
+);
+
+$customers = db_all('SELECT id, name FROM customers ORDER BY name');
+
+/* --- Filters ----------------------------------------------------------- */
+$search  = query('customer');
+$methodF = one_of(query('method'), $PAYMENT_METHODS, '');
+$statusF = one_of(query('status'), $PAYMENT_STATUSES, '');
+
+$where  = [];
+$params = [];
+
+if ($focusOrderId > 0) {
+    $where[]  = 'p.order_id = ?';
+    $params[] = $focusOrderId;
+}
+if ($search !== '') {
+    $where[]  = '(o.customer_name LIKE ? OR c.name LIKE ?)';
+    $params[] = '%' . $search . '%';
+    $params[] = '%' . $search . '%';
+}
+if ($methodF !== '') {
+    $where[]  = 'p.payment_method = ?';
+    $params[] = $methodF;
+}
+if ($statusF !== '') {
+    $where[]  = 'p.status = ?';
+    $params[] = $statusF;
 }
 
-// Delete Payment
-if (isset($_GET['delete'])) {
-    $id = intval($_GET['delete']);
-    mysqli_query($conn, "DELETE FROM payments WHERE id=$id");
-    header("Location: payments.php?msg=deleted");
-    exit();
-}
+$whereSql = $where === [] ? '' : 'WHERE ' . implode(' AND ', $where);
 
-// Update Payment
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
-    $id = intval($_POST['payment_id']);
-    $order_id = intval($_POST['order_id']);
-    $customer_id = intval($_POST['customer_id']);
-    $amount = floatval($_POST['amount']);
-    $payment_date = mysqli_real_escape_string($conn, $_POST['payment_date']);
-    $method = mysqli_real_escape_string($conn, $_POST['payment_method']);
-    $status = mysqli_real_escape_string($conn, $_POST['status']);
+$payments = db_all(
+    "SELECT p.*, o.order_number, o.customer_name AS order_customer_name, o.total_amount,
+            c.name AS linked_customer_name,
+            (SELECT COALESCE(SUM(amount), 0) FROM payments p2
+              WHERE p2.order_id = p.order_id AND p2.status = 'Paid') AS order_paid_sum
+       FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       LEFT JOIN customers c ON c.id = p.customer_id
+       $whereSql
+      ORDER BY p.payment_date DESC",
+    $params
+);
 
-    mysqli_query($conn, "UPDATE payments 
-                         SET order_id=$order_id, customer_id=$customer_id, amount=$amount, 
-                             payment_date='$payment_date', payment_method='$method', status='$status'
-                         WHERE id=$id");
-    header("Location: payments.php?msg=updated");
-    exit();
-}
-
-// Filters
-$where = "1=1";
-if (!empty($_GET['customer'])) {
-    $customer = mysqli_real_escape_string($conn, $_GET['customer']);
-    $where .= " AND c.name LIKE '%$customer%'";
-}
-if (!empty($_GET['method'])) {
-    $method = mysqli_real_escape_string($conn, $_GET['method']);
-    $where .= " AND p.payment_method = '$method'";
-}
-if (!empty($_GET['status'])) {
-    $status = mysqli_real_escape_string($conn, $_GET['status']);
-    $where .= " AND p.status = '$status'";
-}
-
-$payments = mysqli_query($conn, "
-    SELECT p.*, c.name AS customer_name 
-    FROM payments p 
-    JOIN customers c ON p.customer_id = c.id 
-    WHERE $where
-    ORDER BY p.payment_date DESC
-");
-
-$orders = mysqli_query($conn, "SELECT id FROM orders");
-$customers = mysqli_query($conn, "SELECT id, name FROM customers");
+include __DIR__ . '/includes/layout/app_start.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>Payments</title>
-    <link rel="stylesheet" href="css/main.css">
-    <?php include "library/head.php"; ?>
-</head>
-<body class="app sidebar-mini">
-<?php include "library/header.php"; ?>
-<?php include "library/sidebar.php"; ?>
+<div class="page-head">
+  <div>
+    <h1 class="page-head__title">Payments</h1>
+    <p class="page-head__sub"><?= count($payments) ?> payment<?= count($payments) === 1 ? '' : 's' ?> shown</p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn-outline-secondary" href="<?= url('orders.php') ?>">
+      <i class="bi bi-receipt"></i> Orders
+    </a>
+    <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal">
+      <i class="bi bi-plus-lg"></i> Record payment
+    </button>
+  </div>
+</div>
 
-<main class="app-content">
-    <div class="app-title">
-        <h1><i class="bi bi-credit-card"></i> Payments</h1>
+<?php if ($payableOrders === []): ?>
+  <div class="alert alert-warning mb-3">
+    <i class="bi bi-exclamation-triangle"></i>
+    No orders to pay against yet. Place an order first.
+  </div>
+<?php endif; ?>
+
+<!-- Filters -->
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label" for="customer">Customer</label>
+        <input class="form-control" type="text" id="customer" name="customer" value="<?= e($search) ?>" placeholder="Name">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="method">Method</label>
+        <select class="form-select" id="method" name="method">
+          <option value="">Any</option>
+          <?php foreach ($PAYMENT_METHODS as $m): ?>
+            <option value="<?= e($m) ?>" <?= $methodF === $m ? 'selected' : '' ?>><?= e($m) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="status">Status</label>
+        <select class="form-select" id="status" name="status">
+          <option value="">Any</option>
+          <?php foreach ($PAYMENT_STATUSES as $s): ?>
+            <option value="<?= e($s) ?>" <?= $statusF === $s ? 'selected' : '' ?>><?= e($s) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-primary w-100" type="submit"><i class="bi bi-search"></i></button>
+      </div>
+      <?php if ($focusOrderId > 0 || $search !== '' || $methodF !== '' || $statusF !== ''): ?>
+        <div class="col-12">
+          <a class="btn btn-ghost btn-sm" href="<?= url('payments.php') ?>"><i class="bi bi-x-lg"></i> Clear filters</a>
+          <?php if ($focusOrderId > 0): ?>
+            <span class="table__secondary">Showing only order <?= (int) $focusOrderId ?></span>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <?php if ($payments === []): ?>
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty__icon"><i class="bi bi-credit-card"></i></div>
+        <div class="empty__title">No payments match</div>
+        <p class="empty__text">Record one, or try a different filter.</p>
+      </div>
     </div>
-
-    <div class="row">
-        <!-- Add Payment -->
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header bg-primary text-white">Add Payment</div>
-                <div class="card-body">
-                    <form method="POST">
-                        <div class="mb-2">
-                            <label>Order ID</label>
-                            <select name="order_id" class="form-select" required>
-                                <option value="">-- Select Order --</option>
-                                <?php while ($o = mysqli_fetch_assoc($orders)): ?>
-                                    <option value="<?= $o['id'] ?>"><?= $o['id'] ?></option>
-                                <?php endwhile; ?>
-                            </select>
-                        </div>
-                        <div class="mb-2">
-                            <label>Customer</label>
-                            <select name="customer_id" class="form-select" required>
-                                <option value="">-- Select Customer --</option>
-                                <?php mysqli_data_seek($customers, 0); while ($c = mysqli_fetch_assoc($customers)): ?>
-                                    <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['name']) ?></option>
-                                <?php endwhile; ?>
-                            </select>
-                        </div>
-                        <div class="mb-2">
-                            <label>Amount</label>
-                            <input type="number" step="0.01" name="amount" class="form-control" required>
-                        </div>
-                        <div class="mb-2">
-                            <label>Payment Date</label>
-                            <input type="datetime-local" name="payment_date" class="form-control" value="<?= date('Y-m-d\TH:i') ?>" required>
-                        </div>
-                        <div class="mb-2">
-                            <label>Method</label>
-                            <select name="payment_method" class="form-select" required>
-                                <option>Cash</option>
-                                <option>Card</option>
-                                <option>Mobile Money</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label>Status</label>
-                            <select name="status" class="form-select" required>
-                                <option>Paid</option>
-                                <option>Pending</option>
-                            </select>
-                        </div>
-                        <button type="submit" name="add_payment" class="btn btn-primary w-100">Add Payment</button>
-                    </form>
+  <?php else: ?>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Customer</th>
+            <th class="text-end">Amount</th>
+            <th>Method</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th class="text-end">Order balance</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($payments as $p): ?>
+            <?php $balance = round((float) $p['total_amount'] - (float) $p['order_paid_sum'], 2); ?>
+            <tr>
+              <td><?= e($p['order_number'] ?? ('#' . $p['order_id'])) ?></td>
+              <td><?= e($p['linked_customer_name'] ?? $p['order_customer_name']) ?></td>
+              <td class="text-end fw-semi"><?= e(money($p['amount'])) ?></td>
+              <td><?= e($p['payment_method']) ?></td>
+              <td>
+                <span class="badge-soft badge-soft--<?= $p['status'] === 'Paid' ? 'ok' : 'warn' ?>"><?= e($p['status']) ?></span>
+              </td>
+              <td class="table__secondary"><?= e(date('j M Y, H:i', strtotime((string) $p['payment_date']))) ?></td>
+              <td class="text-end <?= $balance > 0 ? 'text-warning' : '' ?>"><?= e(money($balance)) ?></td>
+              <td class="text-end">
+                <div class="table__actions justify-content-end">
+                  <button class="btn btn-ghost btn-icon btn-sm js-edit"
+                          type="button" title="Edit"
+                          data-payment='<?= e(json_encode([
+                              'id'             => (int) $p['id'],
+                              'order_id'       => (int) $p['order_id'],
+                              'customer_id'    => $p['customer_id'] !== null ? (int) $p['customer_id'] : '',
+                              'amount'         => $p['amount'],
+                              'payment_method' => $p['payment_method'],
+                              'status'         => $p['status'],
+                              'payment_date'   => date('Y-m-d\TH:i', strtotime((string) $p['payment_date'])),
+                          ], JSON_UNESCAPED_UNICODE)) ?>'>
+                    <i class="bi bi-pencil"></i>
+                  </button>
+                  <a class="btn btn-ghost btn-icon btn-sm" href="<?= url('invoice.php?id=' . (int) $p['order_id']) ?>" title="Invoice">
+                    <i class="bi bi-receipt"></i>
+                  </a>
+                  <form method="post" action="<?= url('actions/payments.php') ?>" class="m-0"
+                        data-confirm="Delete this payment of <?= e(money($p['amount'])) ?>?">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="do" value="delete">
+                    <input type="hidden" name="id" value="<?= (int) $p['id'] ?>">
+                    <button class="btn btn-ghost btn-icon btn-sm" type="submit" title="Delete" style="color:var(--bad)">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </form>
                 </div>
-            </div>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+</div>
+
+<!-- ============ Record / edit payment modal ============ -->
+<div class="modal fade" id="paymentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="<?= url('actions/payments.php') ?>" id="paymentForm">
+        <?= csrf_field() ?>
+        <input type="hidden" name="do" value="create" id="formAction">
+        <input type="hidden" name="id" value="" id="formId">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Record payment</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
 
-        <!-- Payment List -->
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-header bg-info text-white">All Payments</div>
-                <div class="card-body table-responsive">
-                    <form method="GET" class="row g-2 mb-3">
-                        <div class="col-md-4">
-                            <input type="text" name="customer" class="form-control" placeholder="Customer Name" value="<?= $_GET['customer'] ?? '' ?>">
-                        </div>
-                        <div class="col-md-3">
-                            <select name="method" class="form-select">
-                                <option value="">All Methods</option>
-                                <option <?= ($_GET['method'] ?? '') == 'Cash' ? 'selected' : '' ?>>Cash</option>
-                                <option <?= ($_GET['method'] ?? '') == 'Card' ? 'selected' : '' ?>>Card</option>
-                                <option <?= ($_GET['method'] ?? '') == 'Mobile Money' ? 'selected' : '' ?>>Mobile Money</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <select name="status" class="form-select">
-                                <option value="">All Statuses</option>
-                                <option <?= ($_GET['status'] ?? '') == 'Paid' ? 'selected' : '' ?>>Paid</option>
-                                <option <?= ($_GET['status'] ?? '') == 'Pending' ? 'selected' : '' ?>>Pending</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 d-grid">
-                            <button class="btn btn-primary"><i class="bi bi-search"></i> Filter</button>
-                        </div>
-                    </form>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label" for="f_order">Order <span style="color:var(--bad)">*</span></label>
+            <select class="form-select" id="f_order" name="order_id" required>
+              <option value="">Choose an order…</option>
+              <?php foreach ($payableOrders as $o): ?>
+                <?php $bal = round((float) $o['total_amount'] - (float) $o['paid_sum'], 2); ?>
+                <option value="<?= (int) $o['id'] ?>" data-balance="<?= e(money($bal)) ?>"
+                        <?= $focusOrderId === (int) $o['id'] ? 'selected' : '' ?>>
+                  <?= e($o['order_number'] ?? ('#' . $o['id'])) ?> — <?= e($o['customer_name']) ?>
+                  (balance <?= e(money($bal)) ?>)
+                </option>
+              <?php endforeach; ?>
+            </select>
+            <div class="form-hint" id="balanceHint"></div>
+          </div>
 
-                    <table class="table table-bordered table-hover align-middle">
-                        <thead class="table-light">
-                            <tr>
-                                <th>#</th>
-                                <th>Order</th>
-                                <th>Customer</th>
-                                <th>Amount</th>
-                                <th>Method</th>
-                                <th>Status</th>
-                                <th>Date</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php $i = 1; while ($p = mysqli_fetch_assoc($payments)): ?>
-                            <tr>
-                                <td><?= $i++ ?></td>
-                                <td><?= $p['order_id'] ?></td>
-                                <td><?= htmlspecialchars($p['customer_name']) ?></td>
-                                <td>$<?= number_format($p['amount'], 2) ?></td>
-                                <td><?= $p['payment_method'] ?></td>
-                                <td>
-                                    <span class="badge bg-<?= $p['status'] == 'Paid' ? 'success' : 'warning' ?>">
-                                        <?= $p['status'] ?>
-                                    </span>
-                                </td>
-                                <td><?= $p['payment_date'] ?></td>
-                                <td>
-                                    <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editModal<?= $p['id'] ?>">Edit</button>
-                                    <a href="?delete=<?= $p['id'] ?>" onclick="return confirm('Delete payment?')" class="btn btn-sm btn-danger">Delete</a>
-                                    <a href="receipt_payment.php?id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-receipt"></i> Receipt</a>
-                                </td>
-                            </tr>
-
-                            <!-- Edit Modal -->
-                            <div class="modal fade" id="editModal<?= $p['id'] ?>" tabindex="-1">
-                                <div class="modal-dialog">
-                                    <form method="POST" class="modal-content">
-                                        <div class="modal-header">
-                                            <h5 class="modal-title">Edit Payment</h5>
-                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                        </div>
-                                        <div class="modal-body">
-                                            <input type="hidden" name="payment_id" value="<?= $p['id'] ?>">
-                                            <div class="mb-2">
-                                                <label>Order ID</label>
-                                                <select name="order_id" class="form-select" required>
-                                                    <?php mysqli_data_seek($orders, 0); while ($o = mysqli_fetch_assoc($orders)): ?>
-                                                        <option value="<?= $o['id'] ?>" <?= $o['id'] == $p['order_id'] ? 'selected' : '' ?>><?= $o['id'] ?></option>
-                                                    <?php endwhile; ?>
-                                                </select>
-                                            </div>
-                                            <div class="mb-2">
-                                                <label>Customer</label>
-                                                <select name="customer_id" class="form-select" required>
-                                                    <?php mysqli_data_seek($customers, 0); while ($c = mysqli_fetch_assoc($customers)): ?>
-                                                        <option value="<?= $c['id'] ?>" <?= $c['id'] == $p['customer_id'] ? 'selected' : '' ?>><?= htmlspecialchars($c['name']) ?></option>
-                                                    <?php endwhile; ?>
-                                                </select>
-                                            </div>
-                                            <div class="mb-2">
-                                                <label>Amount</label>
-                                                <input type="number" step="0.01" name="amount" class="form-control" value="<?= $p['amount'] ?>" required>
-                                            </div>
-                                            <div class="mb-2">
-                                                <label>Payment Date</label>
-                                                <input type="datetime-local" name="payment_date" class="form-control" value="<?= date('Y-m-d\TH:i', strtotime($p['payment_date'])) ?>" required>
-                                            </div>
-                                            <div class="mb-2">
-                                                <label>Method</label>
-                                                <select name="payment_method" class="form-select">
-                                                    <option <?= $p['payment_method'] == 'Cash' ? 'selected' : '' ?>>Cash</option>
-                                                    <option <?= $p['payment_method'] == 'Card' ? 'selected' : '' ?>>Card</option>
-                                                    <option <?= $p['payment_method'] == 'Mobile Money' ? 'selected' : '' ?>>Mobile Money</option>
-                                                </select>
-                                            </div>
-                                            <div class="mb-3">
-                                                <label>Status</label>
-                                                <select name="status" class="form-select">
-                                                    <option <?= $p['status'] == 'Paid' ? 'selected' : '' ?>>Paid</option>
-                                                    <option <?= $p['status'] == 'Pending' ? 'selected' : '' ?>>Pending</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="modal-footer">
-                                            <button type="submit" name="update_payment" class="btn btn-success">Save Changes</button>
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
-                        <?php endwhile; ?>
-                        </tbody>
-                    </table>
-                </div>
+          <div class="mb-2">
+            <label class="form-label" for="f_customer">Customer on file (optional)</label>
+            <select class="form-select" id="f_customer" name="customer_id">
+              <option value="">Not linked to a customer record</option>
+              <?php foreach ($customers as $c): ?>
+                <option value="<?= (int) $c['id'] ?>"><?= e($c['name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="form-hint">
+              Orders capture the customer's name as free text; this only links to a
+              record in <a href="<?= url('customers.php') ?>">Customers</a> if you want one.
             </div>
-        </div>
-    </div>
-</main>
+          </div>
 
-<?php include "library/footer.php"; ?>
-<?php include "library/script.php"; ?>
-</body>
-</html>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="f_amount">Amount (<?= e(setting('currency_symbol', '$')) ?>) <span style="color:var(--bad)">*</span></label>
+              <input class="form-control" type="number" id="f_amount" name="amount" step="0.01" min="0.01" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="f_date">Date <span style="color:var(--bad)">*</span></label>
+              <input class="form-control" type="datetime-local" id="f_date" name="payment_date" required>
+            </div>
+          </div>
+
+          <div class="row g-2 mt-0">
+            <div class="col-md-6">
+              <label class="form-label" for="f_method">Method <span style="color:var(--bad)">*</span></label>
+              <select class="form-select" id="f_method" name="payment_method" required>
+                <option value="">Choose…</option>
+                <?php foreach ($PAYMENT_METHODS as $m): ?>
+                  <option value="<?= e($m) ?>"><?= e($m) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="f_status">Status</label>
+              <select class="form-select" id="f_status" name="status">
+                <option value="Paid">Paid</option>
+                <option value="Pending">Pending</option>
+              </select>
+              <div class="form-hint">Only "Paid" counts toward the order's balance.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitBtn">
+            <i class="bi bi-check-lg"></i> Save payment
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<?php
+$focusOrderId_js = ejs($focusOrderId);
+$inlineScript = <<<JS
+(function () {
+  var modalEl  = document.getElementById('paymentModal');
+  var form     = document.getElementById('paymentForm');
+  var titleEl  = document.getElementById('modalTitle');
+  var actionEl = document.getElementById('formAction');
+  var idEl     = document.getElementById('formId');
+  var orderEl  = document.getElementById('f_order');
+  var balanceHint = document.getElementById('balanceHint');
+  var dateEl   = document.getElementById('f_date');
+
+  function nowLocal() {
+    var d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    return d.toISOString().slice(0, 16);
+  }
+
+  function updateBalanceHint() {
+    var opt = orderEl.options[orderEl.selectedIndex];
+    var bal = opt ? opt.getAttribute('data-balance') : null;
+    balanceHint.textContent = bal ? ('Remaining balance: ' + bal) : '';
+  }
+
+  function resetToCreate() {
+    form.reset();
+    actionEl.value = 'create';
+    idEl.value = '';
+    titleEl.textContent = 'Record payment';
+    dateEl.value = nowLocal();
+    updateBalanceHint();
+  }
+
+  document.querySelectorAll('[data-bs-target="#paymentModal"]').forEach(function (btn) {
+    btn.addEventListener('click', resetToCreate);
+  });
+
+  document.querySelectorAll('.js-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var p;
+      try { p = JSON.parse(btn.getAttribute('data-payment')); } catch (e) { return; }
+
+      actionEl.value = 'update';
+      idEl.value = p.id;
+      titleEl.textContent = 'Edit payment';
+
+      orderEl.value = p.order_id;
+      form.querySelector('#f_customer').value = p.customer_id || '';
+      form.querySelector('#f_amount').value = p.amount;
+      form.querySelector('#f_date').value = p.payment_date;
+      form.querySelector('#f_method').value = p.payment_method;
+      form.querySelector('#f_status').value = p.status;
+      updateBalanceHint();
+
+      new bootstrap.Modal(modalEl).show();
+    });
+  });
+
+  orderEl.addEventListener('change', updateBalanceHint);
+
+  modalEl.addEventListener('hidden.bs.modal', function () {
+    var btn = document.getElementById('submitBtn');
+    btn.disabled = false;
+    btn.style.opacity = '';
+  });
+
+  updateBalanceHint();
+
+  var focusOrderId = {$focusOrderId_js};
+  if (focusOrderId) {
+    dateEl.value = nowLocal();
+    new bootstrap.Modal(modalEl).show();
+  }
+})();
+JS;
+
+include __DIR__ . '/includes/layout/app_end.php';

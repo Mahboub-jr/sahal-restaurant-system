@@ -35,9 +35,6 @@ $legacyAccess = [
     'receipt_booking.php'   => ['admin', 'manager', 'cashier'],
     'customers.php'         => ['admin', 'manager', 'cashier'],
 
-    'payments.php'          => ['admin', 'manager', 'cashier'],
-    'receipt_payment.php'   => ['admin', 'manager', 'cashier'],
-
     'reports.php'           => ['admin', 'manager'],
     'export_report.php'     => ['admin', 'manager'],
     'export_user_roles.php' => ['admin'],

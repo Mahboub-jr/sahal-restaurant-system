@@ -270,6 +270,12 @@ $statusColour = [
                   <a class="btn btn-ghost btn-icon btn-sm" href="<?= url('receipt.php?id=' . (int) $o['id']) ?>" title="Receipt">
                     <i class="bi bi-receipt"></i>
                   </a>
+
+                  <?php if (has_role('admin', 'manager', 'cashier') && $o['status'] !== 'Cancelled'): ?>
+                    <a class="btn btn-ghost btn-icon btn-sm" href="<?= url('payments.php?order_id=' . (int) $o['id']) ?>" title="Payments">
+                      <i class="bi bi-cash-coin"></i>
+                    </a>
+                  <?php endif; ?>
                 </div>
               </td>
             </tr>

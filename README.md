@@ -40,6 +40,7 @@ them **in order**:
 | `sql/migrations/002_fix_orphan_menu_category.sql` | Reassigns an orphaned menu item and adds a foreign key |
 | `sql/migrations/004_menu_items_availability.sql` | Adds the availability switch |
 | `sql/migrations/005_order_items_and_totals.sql` | Adds `order_items` (real quantities), tax/service charge, table + waiter on orders |
+| `sql/migrations/006_payments_guard.sql` | Tightens `payments` (amount/date/method required, amount must be positive) |
 
 Each file has verification queries at the bottom and a rollback block.
 
@@ -52,6 +53,10 @@ Each file has verification queries at the bottom and a rollback block.
 > data formats found in the old `orders.items` blob, and a handful of those
 > calls (what counts as a name match, what happens to plain-text rows) were
 > made without a clear answer in the data — review them before you run it.
+
+> **006 does not fix order 19's known double payment** (BUG-5) — it only
+> stops new bad payments going forward. The existing duplicate is left as
+> data for you to review; it will show clearly on `invoice.php?id=19`.
 
 ### 4. Open the app
 
@@ -88,6 +93,15 @@ behaves:
 | `order_history.php` / `cancelled_orders.php` | Completed and Cancelled orders show up here, not on `orders.php`. |
 | `index.php` best sellers | Card should no longer say "Approximate" — quantities are now real. |
 | `kitchen.php` | Three columns: Pending, Preparing, Ready. "Start preparing" / "Mark ready" buttons move a ticket to the next column and disappear once it reaches Ready — completing is still done from `orders.php`, not here. A ticket sitting 10+ minutes in one stage gets a warning-coloured border. The page auto-refreshes every 25 seconds. Each line item has an 86 button (⊘ icon) that marks that menu item unavailable immediately, so it stops appearing on new orders — click it, then check the same item shows "Off menu" instead of the button, and that it also shows unavailable on `menu.php`. |
+
+**After running migration 006**, also check:
+
+| Page | What to look for |
+|---|---|
+| `payments.php` | "Record payment" pre-fills today's date. Pick an order, note the balance shown updates as you change the order dropdown. Record a payment equal to the full balance — the order's `payment_status` on `orders.php` should flip to Paid. |
+| Duplicate-payment guard | On an order already fully paid, try recording another **Paid** payment — it should be rejected with the balance shown in the error, not silently accepted. Try a **Pending** payment on the same order — that should go through, since Pending doesn't count toward the balance. |
+| `invoice.php?id=<order id>` | Shows line items, subtotal/discount/tax/service/total, then every payment recorded, paid total and balance due. Reachable from `orders.php` (cash icon), `payments.php` (receipt icon), and `receipt.php` ("Invoice" button). |
+| `invoice.php?id=19` | Order 19's known duplicate payment (BUG-5) — should show **paid more than the total**, flagged with a warning banner, not hidden or auto-corrected. |
 
 Also worth testing:
 
@@ -163,10 +177,15 @@ moves, and Dine-In orders occupy/free their table automatically. Kitchen
 display added (Pending → Preparing → Ready), sharing the same status-change
 endpoint as Orders. Chef can 86 an item straight from a ticket, which flips
 its menu availability immediately (reuses the existing toggle from Menu
-items, scoped to that one action only).
+items, scoped to that one action only). Payments rebuilt: recording a
+payment re-checks the order's remaining balance inside a locked transaction
+(the BUG-5 duplicate-payment guard), `orders.payment_status` stays in sync
+automatically, and `invoice.php` shows an order's items, totals and every
+payment against it in one place, replacing the old one-payment-at-a-time
+`receipt_payment.php`.
 
-**Next** — payments (including the BUG-5 duplicate-payment guard), inventory,
-reservations, then converting the remaining pages to the new layout.
+**Next** — inventory and reservations (neither exists yet), then converting
+the remaining pages to the new layout.
 
 See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 
@@ -183,10 +202,15 @@ See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
   a nonzero total, and several totals still do not reconcile with their items
   (pre-existing data problems documented as BUG-3/BUG-4 in `AUDIT-ADDENDUM.md`,
   surfaced — not fixed — by the migration's verification queries).
-- **Payments do not yet enforce anything.** `orders.payment_status` exists and
-  is backfilled from the current `payments` table, but nothing stops a second
-  payment from being recorded against an already-paid order (BUG-5). That
-  guard is part of the Payments phase.
+- **Order 19's known double payment (BUG-5) is left in the data on purpose.**
+  The guard added in migration 006 / `actions/payments.php` only stops *new*
+  overpayments; it does not retroactively fix the one that already happened.
+  It shows clearly on `invoice.php?id=19` as overpaid.
+- **Payments have no link back to a specific customer unless you pick one.**
+  Orders capture `customer_name` as free text with no foreign key to
+  `customers`; recording a payment against a `customers` row is optional,
+  not required, since forcing a match would mean inventing a link the data
+  doesn't have.
 - **Editing an order with pre-migration-005 line items** (free-text, no
   `menu_item_id`) drops those specific lines if you save changes — the cart
   can only represent real, priced menu items. `update_order.php` calls this
