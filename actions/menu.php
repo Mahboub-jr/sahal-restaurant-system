@@ -209,7 +209,7 @@ if ($do === 'update') {
  |===================================================================== */
 if ($do === 'toggle') {
     if (!has_availability_column()) {
-        flash_warning('Run migration 003 to enable the availability switch.');
+        flash_warning('Run migration 004 to enable the availability switch.');
         redirect('menu.php');
     }
 

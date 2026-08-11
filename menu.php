@@ -15,7 +15,7 @@ require_role('admin', 'manager');
 $title    = 'Menu items';
 $subtitle = 'Everything the kitchen can sell';
 
-/* Availability arrived in migration 003 — degrade gracefully if it has not
+/* Availability arrived in migration 004 — degrade gracefully if it has not
    been run yet rather than fataling on an unknown column. */
 $hasAvailability = db_value(
     "SELECT 1 FROM information_schema.COLUMNS
@@ -112,9 +112,9 @@ include __DIR__ . '/includes/layout/app_start.php';
   <div class="alert alert-warning mb-3">
     <i class="bi bi-database-exclamation"></i>
     <div>
-      <strong>Migration 003 has not been run.</strong>
+      <strong>Migration 004 has not been run.</strong>
       The availability switch is disabled until you apply
-      <code>sql/migrations/003_menu_items_availability.sql</code> in phpMyAdmin.
+      <code>sql/migrations/004_menu_items_availability.sql</code> in phpMyAdmin.
       Everything else on this page works normally.
     </div>
   </div>

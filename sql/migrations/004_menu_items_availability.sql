@@ -1,5 +1,5 @@
 -- =====================================================================
--- Migration 003 — Menu item availability and audit column
+-- Migration 004 — Menu item availability and audit column
 -- Date: 2026-08-11
 -- =====================================================================
 --

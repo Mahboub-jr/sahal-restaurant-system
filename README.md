@@ -38,7 +38,7 @@ them **in order**:
 |---|---|
 | `sql/migrations/001_fix_order_type_enum.sql` | Repairs `order_type`, which was silently discarding dine-in/takeaway |
 | `sql/migrations/002_fix_orphan_menu_category.sql` | Reassigns an orphaned menu item and adds a foreign key |
-| `sql/migrations/003_menu_items_availability.sql` | Adds the availability switch |
+| `sql/migrations/004_menu_items_availability.sql` | Adds the availability switch |
 
 Each file has verification queries at the bottom and a rollback block.
 
@@ -53,9 +53,9 @@ Each file has verification queries at the bottom and a rollback block.
 You will be sent to the sign-in page. Use an existing account from the `users`
 table.
 
-> If you do not know any password, open `create-admin.php` **once** to create
-> `admin@example.com` / `admin123`, sign in, change the password from
-> **Users**, then delete `create-admin.php`. It must not stay on a live server.
+> If you do not know any password, open `create-admin.php` **once** — it now asks you to set
+> your own email and password (and refuses to run if an admin already exists).
+> Alternatively run `sql/migrations/003_reset_admin_password.sql`. Delete `create-admin.php` afterwards.
 
 ---
 
