@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------
+# Restaurant Management System — git ignore rules
+# ---------------------------------------------------------------
+
+# Quarantined non-project binaries (253 MB of installer artifacts)
+_archive/quarantine/
+
+# Never commit executables
+*.exe
+*.msi
+*.dll
+
+# User-uploaded content — belongs to the deployment, not the repository.
+# The directory itself is kept via uploads/.gitkeep.
+uploads/*
+!uploads/.gitkeep
+
+# Generated receipts / reports
+receites/
+*.pdf
+
+# Local environment secrets (introduced in Phase 1)
+config/config.local.php
+.env
+
+# Development-only tooling — must never reach a server
+_tools/
+
+# Logs
+*.log
+error_log
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store
