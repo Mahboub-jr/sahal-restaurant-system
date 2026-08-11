@@ -1,7 +1,8 @@
 # Sahal Restaurant — Management System
 
-PHP 8 + MariaDB restaurant administration system. Orders, menu, tables,
-bookings, payments, staff, reports and settings in one dashboard.
+PHP 8 + MariaDB restaurant administration system. Orders, kitchen display,
+menu, tables, reservations, payments, inventory, staff and reports in one
+dashboard.
 
 ---
 
@@ -118,6 +119,16 @@ behaves:
 | `stock_movements.php` | Record a "Used" movement larger than what's on hand — it should be rejected rather than taking stock negative. Try a "Correction" — it should require you to pick increase/decrease. There is deliberately no edit or delete here; a mistake gets a new correcting movement, not an edited history. |
 | `index.php` | New "Low stock" and "Today's reservations" cards, only once 007 has run. |
 
+**Pass 7 — every remaining page converted:**
+
+| Page | What to look for |
+|---|---|
+| `categories.php`, `tables.php`, `customers.php`, `employees.php`, `attendance.php`, `attendance_report.php` | New layout, add/edit modals, POST-only deletes with a confirm dialog. |
+| `manage_users.php` | Role dropdown now offers all five roles, not just Admin/Waiter. Try deleting your own account or the last admin — both should be refused. Editing a user can set a new password (blank leaves it unchanged). `user_roles.php` now just redirects here. |
+| `settings.php` | Upload a logo, check it appears on `invoice.php` once "Show logo on invoice" is checked. The old "Theme" dropdown is gone (it wrote to a column nothing read). |
+| `reports.php` | Filter by status/payment/staff/date and confirm the total at the bottom matches the rows shown. This page (and `export_report.php`, and the old `export_user_roles.php`) previously fataled with a database error on every filtered request — first real test is that it loads at all. |
+| Export buttons | `reports.php` and `manage_users.php` both have a CSV export link now (PDF export was dropped along with a 27 MB TCPDF dependency it needed — use the browser's print-to-PDF on `receipt.php`/`invoice.php` if you want an actual PDF). |
+
 Also worth testing:
 
 - **Sidebar collapse** (desktop) and the **drawer** (narrow window) — these were
@@ -140,7 +151,6 @@ includes/
   bootstrap.php     Entry point — loads everything, starts the session
   auth.php          Login, roles, CSRF, gates
   helpers.php       Escaping, URLs, flash messages, secure uploads
-  legacy_guard.php  Auth guard for pages not yet converted
   layout/           head, sidebar, topbar, flash, foot
 actions/            POST-only write handlers (no HTML)
 assets/
@@ -149,7 +159,9 @@ assets/
 sql/
   restaurant_db_baseline_*.sql
   migrations/
-library/            Legacy Vali includes — shrinking as pages convert
+library/            Dead. Nothing includes anything from here any more
+                     (verified — see "Before going live"); kept only until
+                     someone confirms it's safe to delete outright.
 ```
 
 ### Writing a new page
@@ -205,9 +217,18 @@ scratch: stock items with a reorder level, and an append-only stock
 movement ledger (no edit or delete on a movement — corrections are new
 rows, never rewritten history). Dashboard gained a low-stock card and a
 today's-reservations card.
+Every remaining page converted: categories, tables, customers, employees,
+attendance (+ report), users (merged with the old separate roles page),
+settings, and reports (+ CSV export) — the last four of which were fatally
+broken (a database error on every request) and are now fixed as part of
+the rewrite, not separately. `includes/legacy_guard.php` is deleted; every
+page now calls `require_role()` directly, and role checks cover all five
+roles everywhere, not just admin/waiter.
 
-**Next** — converting the remaining pages to the new layout, then RBAC
-rollout and polish/testing (see `AUDIT.md`'s Phases 8-10).
+**Next** — polish and testing (AUDIT.md Phase 10): decide whether to
+delete the now-fully-unused `library/` and `vendor/dompdf-master/`
+(see "Before going live"), assign the manager/cashier/chef roles to real
+staff accounts, and generally exercise the app end-to-end.
 
 See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 
@@ -215,8 +236,6 @@ See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 
 ## Known limitations
 
-- **Pages not yet converted** still use the old Vali styling. They are secured
-  and functional, but visually inconsistent — that is expected mid-migration.
 - **Five roles are supported in code**; only `admin` and `waiter` exist in the
   database so far. Assign the rest from **Users**.
 - **Historical orders (1–20) have gaps migration 005 could not fill honestly**:
@@ -254,6 +273,12 @@ See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 - [ ] Move credentials into `config/config.local.php` (gitignored)
 - [ ] Give MySQL a real user and password — not `root` with no password
 - [ ] Delete `create-admin.php` and `_tools/`
-- [ ] Delete `_archive/quarantine/`
+- [ ] Delete `_archive/quarantine/` (252 MB, the quarantined `.exe` files — AUDIT.md E2)
+- [ ] Delete `library/` (27 MB) and `vendor/dompdf-master/` (9 MB) — confirmed
+      unused by any active page as of pass 7 (`grep` for `include`/`require`
+      of `library/` turns up nothing outside comments and `_archive/`); most
+      of `library/`'s weight is a vendored TCPDF copy that only the now-
+      rewritten `export_report.php`/`export_user_roles.php` ever used, and
+      both use plain CSV now instead
 - [ ] Enable MySQL strict mode (see the note in migration 001)
 - [ ] Serve over HTTPS so session cookies get the `secure` flag
