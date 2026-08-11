@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/includes/legacy_guard.php';
+
 include "library/conn.php";
 require_once "library/tcpdf/TCPDF-main/tcpdf.php"; // For PDF export
 // Filter logic

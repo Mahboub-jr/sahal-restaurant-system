@@ -1,82 +1,139 @@
 <?php
-session_start();
-if (isset($_SESSION['error'])) {
-  echo '<div class="alert alert-danger text-center">'.$_SESSION['error'].'</div>';
-  unset($_SESSION['error']);
+/**
+ * Sign-in page.
+ *
+ * The old version posted to backend/auth.php, which set $_SESSION['user']
+ * while every other page read $_SESSION['user_role'] — so role checks were
+ * dead everywhere (AUDIT.md C1). Authentication now lives in one place:
+ * attempt_login() in includes/auth.php.
+ */
+
+require_once __DIR__ . '/includes/bootstrap.php';
+
+// Already signed in? Nothing to do here.
+if (is_logged_in()) {
+    redirect('index.php');
 }
+
+$error = null;
+$email = '';
+
+if (is_post()) {
+    if (!csrf_valid()) {
+        $error = 'Your session expired. Please try again.';
+    } else {
+        $email = post('email');
+        $error = attempt_login($email, $_POST['password'] ?? '');
+
+        if ($error === null) {
+            flash_success('Welcome back, ' . user_name() . '.');
+            header('Location: ' . intended_url('index.php'));
+            exit;
+        }
+    }
+}
+
+$title     = 'Sign in';
+$bodyClass = 'auth-page';
+include __DIR__ . '/includes/layout/head.php';
 ?>
+<div class="auth">
 
+  <!-- Brand panel -->
+  <aside class="auth__aside">
+    <div class="auth__aside-brand">
+      <img class="auth__aside-logo" src="<?= url('images/Sahal_logo.jpeg') ?>" alt=""
+           onerror="this.style.display='none'">
+      <div>
+        <div class="auth__aside-name"><?= e(APP_NAME) ?></div>
+        <div style="font-size:.75rem;opacity:.7"><?= e(APP_TAGLINE) ?></div>
+      </div>
+    </div>
 
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Main CSS-->
-    <link rel="stylesheet" type="text/css" href="css/main.css">
-    <!-- Font-icon css-->
-    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-    <title>Login - Vali Admin</title>
-  </head>
-  <body>
-    <section class="material-half-bg">
-      <div class="cover"></div>
-    </section>
-    <section class="login-content">
-      <div class="logo">
-        <h1>Sahal Restaurent</h1>
-      </div>
-      <div class="login-box">
-      <form class="login-form" action="backend/auth.php" method="POST">
-          <h3 class="login-head"><i class="bi bi-person me-2"></i>SIGN IN</h3>
-          <div class="mb-3">
-            <label class="form-label">USERNAME</label>
-            <input class="form-control" type="email" name="email" placeholder="Email" required>
+    <div class="auth__aside-copy">
+      <h2>Run the floor, the kitchen and the books from one place.</h2>
+      <p>Orders, tables, menu, payments and staff — all in a single system.</p>
+    </div>
+
+    <div class="auth__aside-foot">
+      &copy; <?= date('Y') ?> <?= e(APP_NAME) ?> · Mogadishu, Somalia
+    </div>
+  </aside>
+
+  <!-- Form -->
+  <main class="auth__main">
+    <div class="auth__card">
+
+      <h1 class="auth__title">Sign in</h1>
+      <p class="auth__sub">Enter your credentials to access the dashboard.</p>
+
+      <?php foreach (take_flashes() as $f): ?>
+        <div class="alert alert-<?= e($f['type']) ?> mb-3">
+          <i class="bi bi-info-circle"></i>
+          <div><?= e($f['message']) ?></div>
+        </div>
+      <?php endforeach; ?>
+
+      <?php if ($error !== null): ?>
+        <div class="alert alert-danger mb-3" role="alert">
+          <i class="bi bi-exclamation-octagon-fill"></i>
+          <div><?= e($error) ?></div>
+        </div>
+      <?php endif; ?>
+
+      <form method="post" novalidate data-allow-resubmit>
+        <?= csrf_field() ?>
+
+        <div class="mb-3">
+          <label class="form-label" for="email">Email address</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+            <input class="form-control" type="email" id="email" name="email"
+                   value="<?= e($email) ?>" placeholder="you@restaurant.com"
+                   autocomplete="username" required autofocus>
           </div>
-          <div class="mb-3">
-            <label class="form-label">PASSWORD</label>
-            <input class="form-control" type="password" name="password" placeholder="Password" required>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="password">Password</label>
+          <div class="input-group" style="position:relative">
+            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+            <input class="form-control" type="password" id="password" name="password"
+                   placeholder="Your password" autocomplete="current-password" required
+                   style="padding-right:2.5rem">
+            <button class="auth__toggle-pw" type="button" id="togglePw"
+                    aria-label="Show password" tabindex="-1">
+              <i class="bi bi-eye"></i>
+            </button>
           </div>
-          <div class="mb-3">
-            <div class="utility">
-              <div class="form-check">
-                <label class="form-check-label">
-                  <input class="form-check-input" type="checkbox"><span class="label-text">Stay Signed in</span>
-                </label>
-              </div>
-              <p class="semibold-text mb-2"><a href="#" data-toggle="flip">Forgot Password ?</a></p>
-            </div>
-          </div>
-          <div class="mb-3 btn-container d-grid">
-            <button class="btn btn-primary btn-block"><i class="bi bi-box-arrow-in-right me-2 fs-5"></i>SIGN IN</button>
-          </div>
-        </form>
-        <form class="forget-form" action="index.html">
-          <h3 class="login-head"><i class="bi bi-person-lock me-2"></i>Forgot Password ?</h3>
-          <div class="mb-3">
-            <label class="form-label">EMAIL</label>
-            <input class="form-control" type="text" placeholder="Email">
-          </div>
-          <div class="mb-3 btn-container d-grid">
-            <button class="btn btn-primary btn-block"><i class="bi bi-unlock me-2 fs-5"></i>RESET</button>
-          </div>
-          <div class="mb-3 mt-3">
-            <p class="semibold-text mb-0"><a href="#" data-toggle="flip"><i class="bi bi-chevron-left me-1"></i> Back to Login</a></p>
-          </div>
-        </form>
-      </div>
-    </section>
-    <!-- Essential javascripts for application to work-->
-    <script src="js/jquery-3.7.0.min.js"></script>
-    <script src="js/bootstrap.min.js"></script>
-    <script src="js/main.js"></script>
-    <script type="text/javascript">
-      // Login Page Flipbox control
-      $('.login-content [data-toggle="flip"]').click(function() {
-      	$('.login-box').toggleClass('flipped');
-      	return false;
-      });
-    </script>
-  </body>
-</html>
+        </div>
+
+        <button class="btn btn-primary btn-lg w-100 justify-content-center" type="submit">
+          <i class="bi bi-box-arrow-in-right"></i> Sign in
+        </button>
+      </form>
+
+      <p class="text-muted text-center mt-4 mb-0" style="font-size:.8125rem">
+        Forgotten your password? Ask an administrator to reset it from
+        <span class="fw-semi">Users</span>.
+      </p>
+    </div>
+  </main>
+</div>
+
+<?php
+$inlineScript = <<<'JS'
+(function () {
+  var btn = document.getElementById('togglePw');
+  var pw  = document.getElementById('password');
+  if (!btn || !pw) return;
+  btn.addEventListener('click', function () {
+    var show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    btn.querySelector('i').className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  });
+})();
+JS;
+
+include __DIR__ . '/includes/layout/foot.php';

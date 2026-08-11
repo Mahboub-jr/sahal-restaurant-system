@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/includes/legacy_guard.php';
+
 include "library/conn.php";
 $result = mysqli_query($conn, "SELECT * FROM menu_items");
 ?>

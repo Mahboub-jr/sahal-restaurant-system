@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/includes/legacy_guard.php';
+
 include "library/conn.php";
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {

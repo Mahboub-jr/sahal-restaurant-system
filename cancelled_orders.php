@@ -1,4 +1,6 @@
-<?php include "library/conn.php"; ?>
+<?php
+require_once __DIR__ . '/includes/legacy_guard.php';
+ include "library/conn.php"; ?>
 <!DOCTYPE html>
 <html>
 <head>

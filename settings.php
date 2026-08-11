@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/includes/legacy_guard.php';
+
 session_start();
 include "library/conn.php";
 
