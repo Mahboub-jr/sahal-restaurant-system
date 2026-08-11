@@ -2,7 +2,12 @@
 <?php
 include "library/conn.php";
 $upload_dir = "uploads/";
-$_SESSION['user_role'] = $user['role'];
+// Removed: $_SESSION['user_role'] = $user['role'];
+// $user was never defined here and there was no session_start(), so this
+// emitted warnings above the DOCTYPE and wrote a null role into the session.
+// Reading the role is the job of the auth helper being introduced in Phase 1;
+// a page must never write it. See AUDIT.md C3.
+
 // Handle deletion
 if (isset($_POST['delete_id'])) {
   $delete_id = intval($_POST['delete_id']);
@@ -54,12 +59,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['name'])) {
   }
 }
 ?>
-<?php if ($_SESSION['user_role'] === 'admin'): ?>
-  <!-- This block will only be shown to admins -->
-  <button>Add Employee</button>
-  <a href="?delete=123">Delete</a>
-<?php endif; ?>
-
+<?php
+// Removed: a leftover scratch block that rendered an unstyled "Add Employee"
+// button and a GET-based delete link ABOVE the DOCTYPE. It read
+// $_SESSION['user_role'], which is never set (see AUDIT.md C1), so in PHP 8
+// it emitted a warning on every page load. Role-gated UI returns in Phase 1
+// via require_role(), enforced server-side rather than by hiding markup.
+?>
 <!DOCTYPE html>
 <html>
 <head>
@@ -94,7 +100,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['name'])) {
                   <?php
                   $categories = mysqli_query($conn, "SELECT * FROM categories");
                   while ($cat = mysqli_fetch_assoc($categories)) {
-                    echo "<option value='{$cat['id']}'>{$cat['name']}</option>";
+                    echo "<option value='" . (int) $cat['id'] . "'>"
+                       . htmlspecialchars($cat['name']) . "</option>";
                   }
                   ?>
                 </select>
@@ -140,22 +147,40 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['name'])) {
               </thead>
               <tbody>
                 <?php
-                $items = mysqli_query($conn, "SELECT m.*, c.name as category FROM menu_items m JOIN categories c ON m.category_id = c.id ORDER BY m.id DESC");
+                // LEFT JOIN, not JOIN. An INNER JOIN silently hid any item whose
+                // category_id pointed at a missing category -- 'bariis' (id 2,
+                // category_id 1) was unmanageable here while still being
+                // orderable from place_order.php. See AUDIT-ADDENDUM.md BUG-2.
+                // Migration 002 adds a FK so this cannot recur, but the LEFT
+                // JOIN stays so nothing can ever disappear from this list again.
+                $items = mysqli_query($conn, "
+                  SELECT m.*, c.name AS category
+                    FROM menu_items m
+                    LEFT JOIN categories c ON m.category_id = c.id
+                   ORDER BY m.id DESC");
                 $sn = 1;
                 while ($item = mysqli_fetch_assoc($items)) {
+                  // An item surfaced by the LEFT JOIN with no category is a data
+                  // problem the manager needs to see, not something to hide.
+                  $categoryCell = $item['category'] !== null
+                    ? htmlspecialchars($item['category'])
+                    : "<span class='badge bg-warning text-dark' title='The category for this item no longer exists'>No category</span>";
+
                   echo "<tr>
                     <td>{$sn}</td>
-                    <td>{$item['name']}</td>
-                    <td>{$item['category']}</td>
-                    <td>$" . number_format($item['price'], 2) . "</td>
+                    <td>" . htmlspecialchars($item['name']) . "</td>
+                    <td>{$categoryCell}</td>
+                    <td>$" . number_format((float) $item['price'], 2) . "</td>
                     <td>";
                       if (!empty($item['food_image'])) {
-                        echo "<img src='{$upload_dir}{$item['food_image']}' width='60' height='60' style='object-fit:cover;'>";
+                        echo "<img src='" . htmlspecialchars($upload_dir . rawurlencode($item['food_image']))
+                           . "' width='60' height='60' style='object-fit:cover;' alt='"
+                           . htmlspecialchars($item['name']) . "'>";
                       } else {
                         echo "No Image";
                       }
                   echo "</td>
-                    <td>{$item['description']}</td>
+                    <td>" . htmlspecialchars((string) $item['description']) . "</td>
                     <td>
                       <form method='POST' onsubmit='return confirm(\"Are you sure you want to delete this item?\");'>
                         <input type='hidden' name='delete_id' value='{$item['id']}'>

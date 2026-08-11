@@ -53,8 +53,13 @@ $result = mysqli_query($conn, "SELECT * FROM menu_items");
               <div class="mb-2">
                 <label>Order Type</label>
                 <select name="order_type" class="form-control" required>
-                  <option>Dine In</option>
-                  <option>Take Away</option>
+                  <!-- These values MUST match orders.order_type ENUM exactly.
+                       They previously read "Dine In" / "Take Away", which are
+                       not ENUM members; MySQL silently stored '' instead.
+                       See sql/migrations/001_fix_order_type_enum.sql -->
+                  <option value="">Select order type</option>
+                  <option value="Dine-In">Dine-In</option>
+                  <option value="Takeaway">Takeaway</option>
                 </select>
               </div>
               <div class="mb-2">

@@ -20,31 +20,49 @@ $decoded_items = json_decode($order['items'], true);
 
 // Handle update
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  $type   = mysqli_real_escape_string($conn, $_POST['order_type']);
-  $status = mysqli_real_escape_string($conn, $_POST['status']);
-  $total  = floatval($_POST['total_amount']);
+  // Whitelist against the actual ENUM definitions. An unmatched value is
+  // stored as '' by MySQL in non-strict mode rather than raising an error.
+  // 'Delivery' was offered by this page's dropdown but was NOT an ENUM member
+  // until migration 001 added it. See AUDIT-ADDENDUM.md BUG-1.
+  $allowed_types    = ['Dine-In', 'Takeaway', 'Delivery'];
+  $allowed_statuses = ['Pending', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
 
-  $items = [];
-  foreach ($_POST['item_name'] as $i => $name) {
-    $items[] = [
-      'name'  => mysqli_real_escape_string($conn, $name),
-      'price' => floatval($_POST['item_price'][$i])
-    ];
-  }
-  $items_json = json_encode($items);
+  $type   = in_array($_POST['order_type'] ?? '', $allowed_types, true)
+          ? $_POST['order_type'] : null;
+  $status = in_array($_POST['status'] ?? '', $allowed_statuses, true)
+          ? $_POST['status'] : null;
+  $total  = floatval($_POST['total_amount'] ?? 0);
 
-  $sql = "UPDATE orders SET
-            order_type    = '$type',
-            items         = '$items_json',
-            total_amount  = $total,
-            status        = '$status'
-          WHERE id = $id";
-
-  if (mysqli_query($conn, $sql)) {
-    header("Location: orders.php?msg=updated");
-    exit();
+  if ($type === null || $status === null) {
+    $update_error = "Invalid order type or status submitted.";
   } else {
-    echo "<div class='alert alert-danger'>Update failed: " . mysqli_error($conn) . "</div>";
+    $items = [];
+    foreach (($_POST['item_name'] ?? []) as $i => $name) {
+      $name = trim((string) $name);
+      if ($name === '') {
+        continue;
+      }
+      $items[] = [
+        'name'  => $name,
+        'price' => floatval($_POST['item_price'][$i] ?? 0)
+      ];
+    }
+    // json_encode output is escaped once, here, for SQL.
+    $items_json = mysqli_real_escape_string($conn, json_encode($items));
+
+    $sql = "UPDATE orders SET
+              order_type    = '$type',
+              items         = '$items_json',
+              total_amount  = $total,
+              status        = '$status'
+            WHERE id = $id";
+
+    if (mysqli_query($conn, $sql)) {
+      header("Location: orders.php?msg=updated");
+      exit();
+    } else {
+      $update_error = "Update failed: " . mysqli_error($conn);
+    }
   }
 }
 ?>
@@ -68,6 +86,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Update Order #<?= $order['id'] ?></h5>
         </div>
         <div class="card-body">
+          <?php if (!empty($update_error)): ?>
+            <div class="alert alert-danger">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              <?= htmlspecialchars($update_error) ?>
+            </div>
+          <?php endif; ?>
           <form method="POST" class="row g-3">
             <!-- Customer (read-only) -->
             <div class="col-md-6">

@@ -3,16 +3,31 @@ include "library/conn.php";
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-  $customer = mysqli_real_escape_string($conn, $_POST['customer']);
-  $order_type = mysqli_real_escape_string($conn, $_POST['order_type']);
-  $total = floatval($_POST['total_amount']);
-  $items_json = mysqli_real_escape_string($conn, $_POST['items']);
+  $customer = mysqli_real_escape_string($conn, $_POST['customer'] ?? '');
+  $order_type_raw = trim($_POST['order_type'] ?? '');
+  $total = floatval($_POST['total_amount'] ?? 0);
+  $items_raw = $_POST['items'] ?? '';
+  $items_json = mysqli_real_escape_string($conn, $items_raw);
   $status = "Pending";
   $created_at = date('Y-m-d H:i:s');
 
+  // Whitelist order_type against the orders.order_type ENUM.
+  // Without this check an unmatched value is silently stored as '' by MySQL
+  // (non-strict mode), which is how orders 17, 19 and 20 lost their type.
+  // See AUDIT-ADDENDUM.md BUG-1.
+  $allowed_order_types = ['Dine-In', 'Takeaway', 'Delivery'];
+  $order_type = in_array($order_type_raw, $allowed_order_types, true)
+      ? $order_type_raw
+      : null;
+
   // Validate
-  if (empty($customer) || empty($order_type) || empty($items_json) || $total <= 0) {
+  if (empty($customer) || empty($items_json) || $total <= 0) {
     $error = "Invalid input data. Please check the form again.";
+  } elseif ($order_type === null) {
+    $error = "Please choose a valid order type ("
+           . implode(', ', $allowed_order_types) . ").";
+  } elseif (!is_array(json_decode($items_raw, true)) || json_decode($items_raw, true) === []) {
+    $error = "Your order contains no items.";
   } else {
     // Insert into orders table
     $sql = "INSERT INTO orders (customer_name, order_type, items, total_amount, status, created_at)
@@ -41,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         <?php if (isset($error)): ?>
           <div class="alert alert-danger">
-            <strong>Error:</strong> <?= $error ?>
+            <strong>Error:</strong> <?= htmlspecialchars($error) ?>
           </div>
           <a href="place_order.php" class="btn btn-secondary">⬅ Back to Order</a>
         <?php else: ?>

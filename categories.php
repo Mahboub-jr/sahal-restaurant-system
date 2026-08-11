@@ -14,11 +14,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_category'])) {
 }
 
 // Handle delete
+// Migration 002 adds fk_menu_items_category with ON DELETE RESTRICT, so this
+// DELETE now FAILS when the category still holds menu items instead of
+// silently orphaning them (which is how 'bariis' became unmanageable --
+// see AUDIT-ADDENDUM.md BUG-2). Report that refusal clearly.
 if (isset($_GET['delete'])) {
     $id = intval($_GET['delete']);
-    mysqli_query($conn, "DELETE FROM categories WHERE id = $id");
-    header("Location: categories.php");
-    exit();
+
+    $inUse = mysqli_fetch_assoc(mysqli_query(
+        $conn,
+        "SELECT COUNT(*) AS c FROM menu_items WHERE category_id = $id"
+    ))['c'] ?? 0;
+
+    if ($inUse > 0) {
+        $delete_error = "This category cannot be deleted: {$inUse} menu item(s) "
+                      . "still belong to it. Reassign or remove those items first.";
+    } elseif (mysqli_query($conn, "DELETE FROM categories WHERE id = $id")) {
+        header("Location: categories.php?msg=deleted");
+        exit();
+    } else {
+        $delete_error = "Could not delete this category: " . mysqli_error($conn);
+    }
 }
 
 // Fetch all categories
@@ -43,6 +59,15 @@ $categories = mysqli_query($conn, "SELECT * FROM categories ORDER BY created_at 
             <p>View, add, and delete menu categories</p>
         </div>
     </div>
+
+    <?php if (!empty($delete_error)): ?>
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i><?= htmlspecialchars($delete_error) ?>
+        </div>
+    <?php endif; ?>
+    <?php if (isset($_GET['msg']) && $_GET['msg'] === 'deleted'): ?>
+        <div class="alert alert-success">Category deleted.</div>
+    <?php endif; ?>
 
     <div class="row">
         <!-- Add Category Form -->
@@ -86,9 +111,9 @@ $categories = mysqli_query($conn, "SELECT * FROM categories ORDER BY created_at 
                         while ($cat = mysqli_fetch_assoc($categories)) {
                             echo "<tr>
                                 <td>{$i}</td>
-                                <td>{$cat['name']}</td>
-                                <td>{$cat['description']}</td>
-                                <td>{$cat['created_at']}</td>
+                                <td>" . htmlspecialchars($cat['name']) . "</td>
+                                <td>" . htmlspecialchars((string) $cat['description']) . "</td>
+                                <td>" . htmlspecialchars((string) $cat['created_at']) . "</td>
                                 <td>
                                     <a href='?delete={$cat['id']}' class='btn btn-sm btn-danger' onclick=\"return confirm('Delete this category?')\">Delete</a>
                                 </td>
