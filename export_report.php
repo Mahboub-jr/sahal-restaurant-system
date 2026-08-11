@@ -1,83 +1,92 @@
 <?php
-require_once __DIR__ . '/includes/legacy_guard.php';
+/**
+ * CSV export of the sales report, same filters as reports.php.
+ *
+ * Replaces the old export_report.php, which queried orders.served_by and
+ * orders.payment_method -- neither column has ever existed, so every
+ * export fataled with "Unknown column". The PDF option pulled in TCPDF for
+ * a five-column table; dropped in favour of CSV plus the browser's own
+ * print-to-PDF, same call as export_user_roles.php.
+ */
 
-include "library/conn.php";
-require_once "library/tcpdf/TCPDF-main/tcpdf.php"; // For PDF export
+require_once __DIR__ . '/includes/bootstrap.php';
+require_role('admin', 'manager');
 
-$type = $_GET['type'] ?? '';
-$format = $_GET['format'] ?? 'excel';
-$payment = isset($_GET['payment']) ? mysqli_real_escape_string($conn, $_GET['payment']) : '';
-$staff = isset($_GET['staff']) ? mysqli_real_escape_string($conn, $_GET['staff']) : '';
+$hasUserId = db_value(
+    "SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'user_id'",
+    [DB_NAME]
+) !== null;
 
-if ($type !== 'sales') {
-  die("Invalid report type.");
+$STATUSES = ['Pending', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
+$METHODS  = ['Cash', 'Card', 'Mobile Money'];
+
+$customerF = query('customer');
+$statusF   = one_of(query('status'), $STATUSES, '');
+$methodF   = one_of(query('payment'), $METHODS, '');
+$staffF    = query_int('staff');
+$fromDate  = query('from_date');
+$toDate    = query('to_date');
+
+$where  = [];
+$params = [];
+if ($customerF !== '') {
+    $where[]  = 'o.customer_name LIKE ?';
+    $params[] = '%' . $customerF . '%';
 }
-
-// Build query
-$conditions = [];
-if ($payment) $conditions[] = "payment_method = '$payment'";
-if ($staff) $conditions[] = "served_by = '$staff'";
-$where = count($conditions) ? 'WHERE ' . implode(' AND ', $conditions) : '';
-
-$query = "SELECT id, order_date, total_amount, payment_method, served_by FROM orders $where ORDER BY order_date DESC";
-$result = mysqli_query($conn, $query);
-
-// Excel Export
-if ($format === 'excel') {
-  header("Content-Type: application/vnd.ms-excel");
-  header("Content-Disposition: attachment; filename=sales_report.xls");
-
-  echo "Order ID\tDate\tAmount\tPayment Method\tServed By\n";
-  while ($row = mysqli_fetch_assoc($result)) {
-    echo "#{$row['id']}\t{$row['order_date']}\t{$row['total_amount']}\t{$row['payment_method']}\t{$row['served_by']}\n";
-  }
-  exit;
+if ($statusF !== '') {
+    $where[]  = 'o.status = ?';
+    $params[] = $statusF;
 }
-
-// PDF Export
-if ($format === 'pdf') {
-  $pdf = new TCPDF();
-  $pdf->SetTitle("Sales Report");
-  $pdf->AddPage();
-
-  $html = '<h3>Sales Report</h3>';
-  if ($payment || $staff) {
-    $html .= '<small>Filters: '
-      . ($payment ? 'Payment = ' . ucfirst($payment) . ' ' : '')
-      . ($staff ? '| Staff = ' . htmlspecialchars($staff) : '')
-      . '</small><br><br>';
-  }
-
-  $html .= '<table border="1" cellpadding="4">
-    <thead>
-      <tr>
-        <th><b>Order ID</b></th>
-        <th><b>Date</b></th>
-        <th><b>Amount</b></th>
-        <th><b>Payment</b></th>
-        <th><b>Served By</b></th>
-      </tr>
-    </thead>
-    <tbody>';
-
-  $total = 0;
-  while ($row = mysqli_fetch_assoc($result)) {
-    $html .= "<tr>
-      <td>#{$row['id']}</td>
-      <td>{$row['order_date']}</td>
-      <td>$" . number_format($row['total_amount'], 2) . "</td>
-      <td>{$row['payment_method']}</td>
-      <td>{$row['served_by']}</td>
-    </tr>";
-    $total += $row['total_amount'];
-  }
-
-  $html .= "<tr><td colspan='2'><b>Total</b></td><td><b>$" . number_format($total, 2) . "</b></td><td colspan='2'></td></tr>";
-  $html .= '</tbody></table>';
-
-  $pdf->writeHTML($html, true, false, true, false, '');
-  $pdf->Output('sales_report.pdf', 'D');
-  exit;
+if ($methodF !== '') {
+    $where[]  = 'EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.payment_method = ?)';
+    $params[] = $methodF;
 }
+if ($staffF > 0 && $hasUserId) {
+    $where[]  = 'o.user_id = ?';
+    $params[] = $staffF;
+}
+if ($fromDate !== '') {
+    $where[]  = 'DATE(o.created_at) >= ?';
+    $params[] = $fromDate;
+}
+if ($toDate !== '') {
+    $where[]  = 'DATE(o.created_at) <= ?';
+    $params[] = $toDate;
+}
+$whereSql = $where === [] ? '' : 'WHERE ' . implode(' AND ', $where);
 
-die("Invalid export format.");
+$userJoin = $hasUserId ? 'LEFT JOIN users u ON u.id = o.user_id' : '';
+$userCol  = $hasUserId ? 'u.name AS waiter_name' : 'NULL AS waiter_name';
+
+$orders = db_all(
+    "SELECT o.id, o.order_number, o.customer_name, o.created_at, o.total_amount, o.status, $userCol,
+            (SELECT GROUP_CONCAT(DISTINCT payment_method SEPARATOR ', ') FROM payments p WHERE p.order_id = o.id) AS payment_methods
+       FROM orders o
+       $userJoin
+       $whereSql
+      ORDER BY o.created_at DESC",
+    $params
+);
+
+header('Content-Type: text/csv; charset=utf-8');
+header('Content-Disposition: attachment; filename="sales_report.csv"');
+
+$out = fopen('php://output', 'w');
+fputcsv($out, ['Order', 'Customer', 'Date', 'Amount', 'Status', 'Payment method(s)', 'Staff']);
+$total = 0.0;
+foreach ($orders as $o) {
+    fputcsv($out, [
+        $o['order_number'] ?? ('#' . $o['id']),
+        $o['customer_name'],
+        date('Y-m-d', strtotime((string) $o['created_at'])),
+        number_format((float) $o['total_amount'], 2, '.', ''),
+        $o['status'],
+        $o['payment_methods'] ?? '',
+        $o['waiter_name'] ?? '',
+    ]);
+    $total += (float) $o['total_amount'];
+}
+fputcsv($out, []);
+fputcsv($out, ['', '', '', number_format($total, 2, '.', ''), '', '', 'Total']);
+fclose($out);
