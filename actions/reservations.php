@@ -226,17 +226,8 @@ if ($do === 'set_status') {
         redirect('reservations.php');
     }
 
-    $allowedNext = [
-        'Pending'   => ['Confirmed', 'Cancelled'],
-        'Confirmed' => ['Seated', 'Cancelled', 'No-show'],
-        'Seated'    => ['Completed'],
-        'Completed' => [],
-        'Cancelled' => [],
-        'No-show'   => [],
-    ];
-
     if (!in_array($next, RESERVATION_STATUSES, true)
-        || !in_array($next, $allowedNext[$reservation['status']] ?? [], true)) {
+        || !status_transition_allowed($reservation['status'], $next, reservation_status_transitions())) {
         flash_error('That reservation cannot move from ' . $reservation['status'] . ' to ' . $next . '.');
         redirect('reservations.php');
     }

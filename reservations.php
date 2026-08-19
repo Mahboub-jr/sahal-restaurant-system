@@ -80,14 +80,7 @@ $reservations = db_all(
 
 $tables = db_all('SELECT id, table_number, capacity, status FROM tables ORDER BY table_number');
 
-$allowedNext = [
-    'Pending'   => ['Confirmed', 'Cancelled'],
-    'Confirmed' => ['Seated', 'Cancelled', 'No-show'],
-    'Seated'    => ['Completed'],
-    'Completed' => [],
-    'Cancelled' => [],
-    'No-show'   => [],
-];
+$allowedNext = reservation_status_transitions();
 $statusColour = [
     'Pending'   => 'neutral',
     'Confirmed' => 'info',

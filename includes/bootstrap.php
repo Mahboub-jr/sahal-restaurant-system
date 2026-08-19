@@ -83,9 +83,10 @@ set_exception_handler(function (Throwable $e): void {
     }
 });
 
-/* --- 3. Database, helpers, auth -------------------------------------- */
+/* --- 3. Database, helpers, business logic, auth ----------------------- */
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/business.php';
 require_once __DIR__ . '/auth.php';
 
 /* --- 4. Session ------------------------------------------------------- */

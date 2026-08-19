@@ -1,0 +1,19 @@
+<?php
+/**
+ * Local environment overrides — copy this file to config.local.php
+ * (which is gitignored) and edit it. config.php loads this FIRST and
+ * every constant it defines wins, because every default in config.php is
+ * guarded by defined().
+ *
+ * Nothing here is required for local XAMPP development — config.php's
+ * defaults (root / no password / restaurant_db) already match a fresh
+ * XAMPP install. This file exists for anything that needs to differ:
+ * a different DB user, a production deployment, etc.
+ */
+
+// cfg('APP_ENV', 'production');
+
+// cfg('DB_HOST', '127.0.0.1');
+// cfg('DB_NAME', 'restaurant_db');
+// cfg('DB_USER', 'your_db_user');
+// cfg('DB_PASS', 'your_db_password');

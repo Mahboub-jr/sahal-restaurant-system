@@ -1,0 +1,28 @@
+{
+    "name": "sahal/restaurant-management-system",
+    "description": "PHP 8 / MariaDB restaurant management system — orders, kitchen display, payments, reservations, inventory and staff, on a single PDO connection with RBAC and CSRF throughout.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.0",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-mbstring": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "find . -name '*.php' -not -path './vendor/*' -not -path './_archive/*' -not -path './_tools/*' -print0 | xargs -0 -n1 php -l"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

@@ -92,13 +92,7 @@ $orders = db_all(
     $params
 );
 
-$allowedNext = [
-    'Pending'   => ['Preparing', 'Cancelled'],
-    'Preparing' => ['Ready', 'Cancelled'],
-    'Ready'     => ['Completed', 'Cancelled'],
-    'Completed' => [],
-    'Cancelled' => [],
-];
+$allowedNext = order_status_transitions();
 $statusRoles = [
     'Preparing' => ['admin', 'manager', 'cashier', 'waiter'],
     'Ready'     => ['admin', 'manager', 'cashier', 'waiter'],

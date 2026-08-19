@@ -26,6 +26,15 @@ config/config.local.php
 # Development-only tooling — must never reach a server
 _tools/
 
+# Composer dependencies — installed via `composer install`, not committed.
+# composer.lock IS committed (this is an application, not a library) for
+# reproducible installs — do not ignore it here.
+/vendor/
+
+# PHPUnit
+.phpunit.result.cache
+/build/
+
 # Logs
 *.log
 error_log

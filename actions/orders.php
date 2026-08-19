@@ -120,35 +120,18 @@ function load_cart_items(): array
 }
 
 /**
- * subtotal, discount, tax, service_charge, total -- all rounded to cents.
- * Tax and service charge are computed on (subtotal - discount), which is
- * the ordinary convention and the only one settings.php's two rates could
- * mean, since neither order form has ever offered a choice.
+ * Thin wrapper around the pure compute_order_totals() in includes/business.php
+ * -- reads the two rates from Settings, which is a side effect that keeps
+ * that shared function DB-free and testable.
  */
 function compute_totals(array $items, float $discountInput): array
 {
-    $subtotal = 0.0;
-    foreach ($items as $it) {
-        $subtotal += $it['price'] * $it['quantity'];
-    }
-    $subtotal = round($subtotal, 2);
-    $discount = round(max(0.0, min($discountInput, $subtotal)), 2);
-
-    $taxRate     = (float) setting('tax_rate', 0);
-    $serviceRate = (float) setting('service_charge', 0);
-    $taxableBase = $subtotal - $discount;
-
-    $tax           = round($taxableBase * $taxRate / 100, 2);
-    $serviceCharge = round($taxableBase * $serviceRate / 100, 2);
-    $total         = round($subtotal - $discount + $tax + $serviceCharge, 2);
-
-    return [
-        'subtotal'       => $subtotal,
-        'discount'       => $discount,
-        'tax'            => $tax,
-        'service_charge' => $serviceCharge,
-        'total'          => $total,
-    ];
+    return compute_order_totals(
+        $items,
+        $discountInput,
+        (float) setting('tax_rate', 0),
+        (float) setting('service_charge', 0)
+    );
 }
 
 $do = post('do');
@@ -345,16 +328,8 @@ if ($do === 'set_status') {
         redirect($returnTo);
     }
 
-    $allowedNext = [
-        'Pending'   => ['Preparing', 'Cancelled'],
-        'Preparing' => ['Ready', 'Cancelled'],
-        'Ready'     => ['Completed', 'Cancelled'],
-        'Completed' => [],
-        'Cancelled' => [],
-    ];
-
     if (!in_array($next, ORDER_STATUSES, true)
-        || !in_array($next, $allowedNext[$order['status']] ?? [], true)) {
+        || !status_transition_allowed($order['status'], $next, order_status_transitions())) {
         flash_error('Order #' . $id . ' cannot move from ' . $order['status'] . ' to ' . $next . '.');
         redirect($returnTo);
     }

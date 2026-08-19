@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    name: Lint + unit tests (PHP ${{ matrix.php-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 8.0 is the deployment target (see config/config.php); 8.2/8.3 are
+        # checked too so a future upgrade doesn't land as a surprise.
+        php-version: ['8.0', '8.2', '8.3']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ matrix.php-version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: pdo, pdo_mysql, mbstring, json
+          coverage: none
+
+      - name: Syntax-check every PHP file
+        run: |
+          set -e
+          find . -name '*.php' \
+            -not -path './vendor/*' \
+            -not -path './_archive/*' \
+            -not -path './_tools/*' \
+            -print0 | xargs -0 -n1 -P4 php -l
+
+      - name: Install Composer dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Run the unit test suite
+        run: vendor/bin/phpunit --colors=always
