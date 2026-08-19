@@ -72,7 +72,7 @@ the full paper trail of what changed and why.
 | **Dashboard** — KPIs, revenue trend, low stock, today's reservations | ![Dashboard](docs/screenshots/dashboard.png) |
 | **New order** — menu grid, cart, live tax/service estimate | ![New order](docs/screenshots/place_order.png) |
 | **Kitchen display** — Pending/Preparing/Ready board | ![Kitchen display](docs/screenshots/kitchen.png) |
-| **Invoice** — items, totals, every payment against the order | ![Invoice](docs/screenshots/invoice.png) |
+| **Payments** — every payment recorded, the duplicate-payment guard's balance column | ![Payments](docs/screenshots/invoice.png) |
 
 Missing a screenshot? The image just won't render — nothing else breaks.
 See `docs/screenshots/README.md` for exactly what to capture.
