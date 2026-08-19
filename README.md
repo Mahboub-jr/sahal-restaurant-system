@@ -1,8 +1,67 @@
 # Sahal Restaurant — Management System
 
-PHP 8 + MariaDB restaurant administration system. Orders, kitchen display,
-menu, tables, reservations, payments, inventory, staff and reports in one
-dashboard.
+<!--
+  Replace OWNER/REPO below with the real GitHub path once this is pushed —
+  see the bottom of the README for the exact push commands.
+-->
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?logo=php&logoColor=white)
+![MariaDB](https://img.shields.io/badge/MariaDB-10.4-003545?logo=mariadb&logoColor=white)
+
+A full-stack PHP 8 / MariaDB restaurant management system — orders, a live
+kitchen display, payments with a duplicate-payment guard, table
+reservations, inventory with an append-only stock ledger, staff/attendance,
+and role-based access control for five staff roles, built on a single PDO
+connection with no framework.
+
+This started as an inherited, insecure PHP admin template (see `AUDIT.md`)
+and was rebuilt in a series of documented, migration-by-migration passes —
+`README.md`'s "Current state" section and the `sql/migrations/` folder are
+the full paper trail of what changed and why.
+
+## Features
+
+- **Orders** — cart-based ordering with server-side pricing (a client can
+  never set its own total), real per-item quantities, tax/service charge
+  computed from Settings, and Dine-In orders that occupy/free their table
+  automatically.
+- **Kitchen display** — a live Pending → Preparing → Ready board with a
+  one-click "86 this item" that pulls a dish off the menu the moment it
+  runs out.
+- **Payments & invoicing** — recording a payment locks the order row and
+  rejects anything that would overpay it, inside the same transaction —
+  the actual fix for the duplicate-payment bug the audit found.
+- **Reservations** — party size, notes, a real status lifecycle, and a
+  table's live status (Available / Reserved / Occupied) shared with Orders.
+- **Inventory** — stock items with a reorder level, backed by an
+  append-only movement ledger (received/used/wasted/corrected) — a mistake
+  is corrected with a new row, never an edited one.
+- **Staff & RBAC** — five roles (admin/manager/cashier/waiter/chef)
+  enforced server-side on every page and every write, not just hidden in
+  the UI; attendance tracking; CSV exports.
+- **Security throughout** — CSRF tokens on every form, bound parameters
+  everywhere, secure image uploads (content-verified, not extension-
+  trusted), session hardening, POST-only mutations.
+
+## Tech stack
+
+PHP 8 (no framework — deliberately: a single PDO connection, small
+per-page scripts, and `actions/*.php` write handlers), MariaDB, Bootstrap 5,
+vanilla JS. PHPUnit for the test suite, GitHub Actions for CI.
+
+---
+
+## Quick start
+
+```bash
+git clone <this-repo-url>
+cd Restuarent_system
+composer install          # only needed to run the test suite
+```
+
+Then follow **"Running it"** below to get the database and app running
+under XAMPP. See **"Testing"** further down to run the test suite.
 
 ---
 
@@ -151,6 +210,8 @@ includes/
   bootstrap.php     Entry point — loads everything, starts the session
   auth.php          Login, roles, CSRF, gates
   helpers.php       Escaping, URLs, flash messages, secure uploads
+  business.php      Pure calculations (order totals, status transitions) —
+                     no DB, no session; the part of the app tests/ covers
   layout/           head, sidebar, topbar, flash, foot
 actions/            POST-only write handlers (no HTML)
 assets/
@@ -159,10 +220,17 @@ assets/
 sql/
   restaurant_db_baseline_*.sql
   migrations/
-library/            Dead. Nothing includes anything from here any more
-                     (verified — see "Before going live"); kept only until
-                     someone confirms it's safe to delete outright.
+tests/
+  bootstrap.php     Loads only helpers.php + business.php — no DB, no session
+  Unit/             Pure-function tests (see "Testing")
+.github/workflows/  CI: lint every .php file, run the test suite
 ```
+
+`library/`, the root `css/`/`js/`, and `vendor/dompdf-master/` — the old
+Vali admin template's assets and a vendored PDF library nothing referenced
+any more — have been deleted outright (verified with a repo-wide `grep`
+before removal; see the pass 7 commits for the exact evidence). Nothing in
+the current app includes anything from any of them.
 
 ### Writing a new page
 
@@ -189,6 +257,46 @@ include __DIR__ . '/includes/layout/app_start.php';
 - Every POST form carries `<?= csrf_field() ?>`; every handler calls `csrf_check()`
 - Deletes are POST forms, never links
 - Assets and links go through `url()`, never a relative path
+
+---
+
+## Testing
+
+```bash
+composer install
+composer test          # or: vendor/bin/phpunit
+```
+
+The suite covers `includes/helpers.php` and `includes/business.php` — the
+parts of the app with no database or session dependency, so it runs
+anywhere with PHP 8 and Composer, no XAMPP or MySQL required. It's
+deliberately scoped to what's genuinely unit-testable without dragging in
+a live DB connection:
+
+- **`includes/business.php`** exists *because* of this suite. It used to
+  be private functions inside `actions/orders.php` / `actions/reservations.php`,
+  which can't be `require`d in a test without also triggering their
+  `require_post()` / `require_role()` / `csrf_check()` guards. Pulling the
+  pure calculations (order totals, status-transition rules) out into their
+  own dependency-free file made them directly testable, and incidentally
+  fixed a small duplication bug — `orders.php` and `actions/orders.php` (and
+  the reservations equivalents) each used to carry their own hand-copied
+  transition table, which could silently drift apart. Now there's one.
+- **`includes/helpers.php`** — `e()`, `ejs()`, `one_of()`, `url()`,
+  `time_ago()`, `status_colour()`. `money()` and `setting()` are excluded
+  since they read from the `settings` table.
+
+**Not yet covered**: anything that touches the database — the order/payment/
+reservation write paths in `actions/*.php`, the migrations themselves. That
+would mean spinning up a seeded MySQL instance (import the baseline dump,
+run all 7 migrations, then test against it) — very doable, and CI already
+has the shape for it (a `services:` block away), but it's a genuinely
+separate piece of work from the unit suite above, not something to bolt on
+without being able to verify it actually runs.
+
+CI (`.github/workflows/ci.yml`) runs `php -l` across every file in the repo
+plus the test suite above, on PHP 8.0 (the deployment target), 8.2 and 8.3,
+on every push and pull request.
 
 ---
 
@@ -225,12 +333,22 @@ the rewrite, not separately. `includes/legacy_guard.php` is deleted; every
 page now calls `require_role()` directly, and role checks cover all five
 roles everywhere, not just admin/waiter.
 
-**Next** — polish and testing (AUDIT.md Phase 10): decide whether to
-delete the now-fully-unused `library/` and `vendor/dompdf-master/`
-(see "Before going live"), assign the manager/cashier/chef roles to real
-staff accounts, and generally exercise the app end-to-end.
+Repo cleanup: `library/` (the old admin template's assets plus a 27 MB
+vendored TCPDF copy nothing referenced any more), `vendor/dompdf-master/`
+(9 MB, same story), the root `css/`/`js/` folders (superseded by
+`assets/`), five 0-byte placeholder files inherited from the original
+codebase, 16 leftover template demo `.html` pages, and two stray/unused
+asset folders (`pictures/`, `receites/`) are all deleted outright — every
+one confirmed unreferenced with a repo-wide `grep` first. `includes/business.php`
+extracted the pure order-total and status-transition logic out of
+`actions/orders.php`/`actions/reservations.php` so it could be unit
+tested (see "Testing"). `composer.json`, a PHPUnit suite, GitHub Actions
+CI, and an MIT `LICENSE` were added — the repo is now the size of the
+actual application, not the template it was built on top of.
 
-See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
+**Next** — assign the manager/cashier/chef roles to real staff accounts,
+exercise the app end-to-end, and the remaining "Before going live" items
+below. See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full history.
 
 ---
 
@@ -269,16 +387,21 @@ See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full findings.
 
 ## Before going live
 
-- [ ] Set `APP_ENV` to `production` in `config/config.php`
+- [x] Delete `library/`, `vendor/dompdf-master/`, root `css/`/`js/` — confirmed
+      unused by any active page (`grep` for `include`/`require` of any of
+      them turned up nothing outside comments and `_archive/`) before removal
+- [ ] Set `APP_ENV` to `production` in `config/config.php` (or in
+      `config/config.local.php` — copy `config/config.local.php.example`)
 - [ ] Move credentials into `config/config.local.php` (gitignored)
 - [ ] Give MySQL a real user and password — not `root` with no password
 - [ ] Delete `create-admin.php` and `_tools/`
-- [ ] Delete `_archive/quarantine/` (252 MB, the quarantined `.exe` files — AUDIT.md E2)
-- [ ] Delete `library/` (27 MB) and `vendor/dompdf-master/` (9 MB) — confirmed
-      unused by any active page as of pass 7 (`grep` for `include`/`require`
-      of `library/` turns up nothing outside comments and `_archive/`); most
-      of `library/`'s weight is a vendored TCPDF copy that only the now-
-      rewritten `export_report.php`/`export_user_roles.php` ever used, and
-      both use plain CSV now instead
+- [ ] Delete `_archive/quarantine/` (252 MB of quarantined `.exe` files —
+      AUDIT.md E2; not committed to git, but still worth clearing off disk)
 - [ ] Enable MySQL strict mode (see the note in migration 001)
 - [ ] Serve over HTTPS so session cookies get the `secure` flag
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
