@@ -1,10 +1,6 @@
 # Sahal Restaurant — Management System
 
-<!--
-  Replace OWNER/REPO below with the real GitHub path once this is pushed —
-  see the bottom of the README for the exact push commands.
--->
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/Mahboub-jr/sahal-restaurant-system/actions/workflows/ci.yml/badge.svg)](https://github.com/Mahboub-jr/sahal-restaurant-system/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?logo=php&logoColor=white)
 ![MariaDB](https://img.shields.io/badge/MariaDB-10.4-003545?logo=mariadb&logoColor=white)
@@ -92,7 +88,10 @@ vanilla JS. PHPUnit for the test suite, GitHub Actions for CI.
 ## Quick start
 
 ```bash
-git clone <this-repo-url>
+# The folder name here matches what the rest of this README assumes
+# (BASE_URL is computed automatically either way — any folder name works,
+# this just keeps the docs below consistent with what you actually have).
+git clone https://github.com/Mahboub-jr/sahal-restaurant-system.git Restuarent_system
 cd Restuarent_system
 composer install          # only needed to run the test suite
 ```
@@ -108,11 +107,15 @@ under XAMPP. See **"Testing"** further down to run the test suite.
 
 Open the XAMPP Control Panel and start **Apache** and **MySQL**.
 
-The project must live in `htdocs`. It currently does:
+The project must live inside `htdocs`. It currently does:
 
 ```
 D:\Xampp\htdocs\Restuarent_system
 ```
+
+The folder name itself doesn't matter — `config/config.php` computes
+`BASE_URL` from wherever the project actually sits — this just keeps every
+path this README shows you consistent with a real working copy.
 
 ### 2. Create the database
 
