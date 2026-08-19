@@ -300,5 +300,89 @@ if ($do === 'delete') {
     redirect($returnTo);
 }
 
+/* =====================================================================
+ | Set ingredients (recipe) -- migration 008
+ |=====================================================================
+ | Replaces the item's entire ingredient list every time -- simpler and
+ | safer than trying to diff add/remove/edit against a form that posts
+ | parallel arrays, and matches how actions/orders.php replaces an
+ | order's line items wholesale on edit.
+ */
+if ($do === 'set_ingredients') {
+    require_role('admin', 'manager');
+
+    $hasIngredients = db_value(
+        "SELECT 1 FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'menu_item_ingredients'",
+        [DB_NAME]
+    ) !== null;
+
+    if (!$hasIngredients) {
+        flash_error('Run sql/migrations/008_menu_item_ingredients.sql before setting ingredients.');
+        redirect($returnTo);
+    }
+
+    $id = post_int('id');
+    $item = db_one('SELECT id, name FROM menu_items WHERE id = ?', [$id]);
+    if ($item === null) {
+        flash_error('That menu item no longer exists.');
+        redirect($returnTo);
+    }
+
+    $inventoryIds = $_POST['inventory_item_id'] ?? [];
+    $quantities   = $_POST['quantity_required'] ?? [];
+    $errors       = [];
+    $lines        = [];
+    $seen         = [];
+
+    if (is_array($inventoryIds) && is_array($quantities)) {
+        foreach ($inventoryIds as $i => $rawId) {
+            $inventoryId = (int) $rawId;
+            $qtyRaw      = $quantities[$i] ?? '';
+            if ($inventoryId <= 0 && $qtyRaw === '') {
+                continue; // a blank trailing row from the form, not a real line
+            }
+
+            $qty = is_numeric($qtyRaw) ? (float) $qtyRaw : -1;
+
+            if ($inventoryId <= 0) {
+                $errors[] = 'Choose a stock item for every ingredient row.';
+            } elseif (db_value('SELECT 1 FROM inventory_items WHERE id = ?', [$inventoryId]) === null) {
+                $errors[] = 'One of the chosen stock items no longer exists.';
+            } elseif (isset($seen[$inventoryId])) {
+                $errors[] = 'The same stock item was added twice -- combine those into one row.';
+            } elseif ($qty <= 0) {
+                $errors[] = 'Quantity must be greater than zero for every ingredient row.';
+            } else {
+                $seen[$inventoryId] = true;
+                $lines[] = ['inventory_item_id' => $inventoryId, 'quantity_required' => round($qty, 3)];
+            }
+        }
+    }
+
+    if ($errors !== []) {
+        flash_error(implode(' ', array_unique($errors)));
+        redirect($returnTo);
+    }
+
+    db_transaction(function () use ($id, $lines) {
+        db_run('DELETE FROM menu_item_ingredients WHERE menu_item_id = ?', [$id]);
+        foreach ($lines as $line) {
+            db_run(
+                'INSERT INTO menu_item_ingredients (menu_item_id, inventory_item_id, quantity_required)
+                 VALUES (?, ?, ?)',
+                [$id, $line['inventory_item_id'], $line['quantity_required']]
+            );
+        }
+    });
+
+    flash_success(
+        $lines === []
+            ? '“' . $item['name'] . '” no longer has ingredients tracked.'
+            : '“' . $item['name'] . '” now tracks ' . count($lines) . ' ingredient' . (count($lines) === 1 ? '' : 's') . '.'
+    );
+    redirect($returnTo);
+}
+
 flash_error('Unrecognised action.');
 redirect($returnTo);

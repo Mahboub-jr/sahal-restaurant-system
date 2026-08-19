@@ -26,6 +26,30 @@ $hasAvailability = db_value(
 
 $categories = db_all('SELECT id, name FROM categories ORDER BY name');
 
+/* Ingredients (recipes) arrived in migration 008 — same degrade-gracefully
+   pattern as availability above. */
+$hasIngredients = db_value(
+    "SELECT 1 FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'menu_item_ingredients'",
+    [DB_NAME]
+) !== null;
+
+$inventoryItems = $hasIngredients
+    ? db_all('SELECT id, name, unit FROM inventory_items ORDER BY name')
+    : [];
+
+$ingredientsByMenuItem = [];
+if ($hasIngredients) {
+    foreach (db_all(
+        'SELECT mi.menu_item_id, mi.inventory_item_id, mi.quantity_required, i.name, i.unit
+           FROM menu_item_ingredients mi
+           JOIN inventory_items i ON i.id = mi.inventory_item_id
+          ORDER BY i.name'
+    ) as $row) {
+        $ingredientsByMenuItem[(int) $row['menu_item_id']][] = $row;
+    }
+}
+
 /* --- Filters ------------------------------------------------------- */
 $search       = query('q');
 $filterCat    = query_int('category');
@@ -291,6 +315,27 @@ include __DIR__ . '/includes/layout/app_start.php';
                     <i class="bi bi-pencil"></i>
                   </button>
 
+                  <?php if ($hasIngredients): ?>
+                    <button class="btn btn-ghost btn-icon btn-sm js-ingredients"
+                            type="button"
+                            title="Ingredients"
+                            data-menu-item-id="<?= (int) $item['id'] ?>"
+                            data-menu-item-name="<?= e($item['name']) ?>"
+                            data-ingredients='<?= e(json_encode(array_map(
+                                function ($row) {
+                                    return [
+                                        'inventory_item_id' => (int) $row['inventory_item_id'],
+                                        'name'               => $row['name'],
+                                        'unit'               => $row['unit'],
+                                        'quantity_required'  => $row['quantity_required'],
+                                    ];
+                                },
+                                $ingredientsByMenuItem[(int) $item['id']] ?? []
+                            ), JSON_UNESCAPED_UNICODE)) ?>'>
+                      <i class="bi bi-list-check"></i>
+                    </button>
+                  <?php endif; ?>
+
                   <!-- POST, never a link. A GET delete can be fired by a
                        crawler or a prefetching browser (AUDIT.md E5). -->
                   <form method="post" action="<?= url('actions/menu.php') ?>" class="m-0"
@@ -419,6 +464,53 @@ include __DIR__ . '/includes/layout/app_start.php';
   </div>
 </div>
 
+<?php if ($hasIngredients): ?>
+<!-- ============ Ingredients (recipe) modal ============ -->
+<div class="modal fade" id="ingredientsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <form method="post" action="<?= url('actions/menu.php') ?>" id="ingredientsForm">
+        <?= csrf_field() ?>
+        <input type="hidden" name="do" value="set_ingredients">
+        <input type="hidden" name="id" value="" id="ingredientsMenuItemId">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="ingredientsModalTitle">Ingredients</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <p class="form-hint">
+            How much of each stock item ONE unit of this dish uses. Placing an
+            order consumes this amount, multiplied by the quantity ordered
+            (see <a href="<?= url('inventory.php') ?>" target="_blank">Inventory</a>).
+            Leave empty to stop tracking stock for this item.
+          </p>
+          <?php if ($inventoryItems === []): ?>
+            <div class="alert alert-warning mb-0">
+              No stock items exist yet — <a href="<?= url('inventory.php') ?>">add one</a> first.
+            </div>
+          <?php else: ?>
+            <div id="ingredientRows"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="addIngredientRow">
+              <i class="bi bi-plus-lg"></i> Add ingredient
+            </button>
+          <?php endif; ?>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="ingredientsSubmitBtn"
+                  <?= $inventoryItems === [] ? 'disabled' : '' ?>>
+            <i class="bi bi-check-lg"></i> Save ingredients
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <?php
 $inlineScript = <<<'JS'
 (function () {
@@ -525,5 +617,74 @@ $inlineScript = <<<'JS'
   }
 })();
 JS;
+
+if ($hasIngredients) {
+    $inventoryItems_js = ejs(array_map(function ($i) {
+        return ['id' => (int) $i['id'], 'name' => $i['name'], 'unit' => $i['unit']];
+    }, $inventoryItems));
+
+    $inlineScript .= <<<JS
+
+(function () {
+  var inventoryItems = {$inventoryItems_js};
+  if (!inventoryItems.length) return;
+
+  var modalEl   = document.getElementById('ingredientsModal');
+  var form      = document.getElementById('ingredientsForm');
+  var titleEl   = document.getElementById('ingredientsModalTitle');
+  var idEl      = document.getElementById('ingredientsMenuItemId');
+  var rowsEl    = document.getElementById('ingredientRows');
+  var addBtn    = document.getElementById('addIngredientRow');
+
+  function addRow(selectedId, quantity) {
+    var row = document.createElement('div');
+    row.className = 'row g-2 mb-2 ingredient-row align-items-center';
+
+    var options = '<option value="">Choose a stock item…</option>';
+    inventoryItems.forEach(function (item) {
+      var sel = (selectedId && String(item.id) === String(selectedId)) ? 'selected' : '';
+      options += '<option value="' + item.id + '" ' + sel + '>' + item.name + ' (' + item.unit + ')</option>';
+    });
+
+    row.innerHTML =
+      '<div class="col-7"><select class="form-select" name="inventory_item_id[]">' + options + '</select></div>' +
+      '<div class="col-3"><input class="form-control" type="number" step="0.001" min="0.001" ' +
+        'name="quantity_required[]" placeholder="Qty per dish" value="' + (quantity || '') + '"></div>' +
+      '<div class="col-2"><button type="button" class="btn btn-ghost btn-icon btn-sm js-remove-row">' +
+        '<i class="bi bi-trash"></i></button></div>';
+
+    row.querySelector('.js-remove-row').addEventListener('click', function () { row.remove(); });
+    rowsEl.appendChild(row);
+  }
+
+  addBtn.addEventListener('click', function () { addRow(null, null); });
+
+  document.querySelectorAll('.js-ingredients').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var ingredients;
+      try { ingredients = JSON.parse(btn.getAttribute('data-ingredients')); } catch (e) { ingredients = []; }
+
+      idEl.value = btn.getAttribute('data-menu-item-id');
+      titleEl.textContent = 'Ingredients for “' + btn.getAttribute('data-menu-item-name') + '”';
+      rowsEl.innerHTML = '';
+
+      if (ingredients.length) {
+        ingredients.forEach(function (ing) { addRow(ing.inventory_item_id, ing.quantity_required); });
+      } else {
+        addRow(null, null);
+      }
+
+      new bootstrap.Modal(modalEl).show();
+    });
+  });
+
+  modalEl.addEventListener('hidden.bs.modal', function () {
+    var btn = document.getElementById('ingredientsSubmitBtn');
+    btn.disabled = false;
+    btn.style.opacity = '';
+  });
+})();
+JS;
+}
 
 include __DIR__ . '/includes/layout/app_end.php';

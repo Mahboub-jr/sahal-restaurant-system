@@ -134,6 +134,59 @@ function compute_totals(array $items, float $discountInput): array
     );
 }
 
+/**
+ * Records a 'Used' stock movement for every ingredient the given order
+ * items consume, per their recipe in menu_item_ingredients (migration 008).
+ * Does nothing if that migration has not run, or for an item with no
+ * recipe defined -- inventory tracking is opt-in per dish, set from
+ * menu.php's Ingredients modal.
+ *
+ * Deliberately never blocks the order and never refuses to go negative --
+ * a kitchen has to be able to serve food regardless of what the ledger
+ * says. See migration 008's header for the full reasoning, and the
+ * "Known limitations" in README.md for what this does NOT do (reverse on
+ * edit, restore on cancel).
+ */
+function consume_ingredients_for_order(int $orderId, array $items): void
+{
+    static $hasIngredients = null;
+    if ($hasIngredients === null) {
+        $hasIngredients = db_value(
+            "SELECT 1 FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'menu_item_ingredients'",
+            [DB_NAME]
+        ) !== null;
+    }
+    if (!$hasIngredients) {
+        return;
+    }
+
+    foreach ($items as $it) {
+        if ($it['menu_item_id'] === null) {
+            continue; // legacy/unmatched line -- no recipe to look up
+        }
+
+        $recipe = db_all(
+            'SELECT inventory_item_id, quantity_required FROM menu_item_ingredients WHERE menu_item_id = ?',
+            [$it['menu_item_id']]
+        );
+
+        foreach ($recipe as $ingredient) {
+            $consumed = round((float) $ingredient['quantity_required'] * $it['quantity'], 3);
+
+            db_run(
+                'UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ? WHERE id = ?',
+                [$consumed, $ingredient['inventory_item_id']]
+            );
+            db_run(
+                'INSERT INTO stock_movements (inventory_item_id, type, change_qty, reason, user_id)
+                 VALUES (?, ?, ?, ?, ?)',
+                [$ingredient['inventory_item_id'], 'Used', -$consumed, 'Order #' . $orderId, user_id()]
+            );
+        }
+    }
+}
+
 $do = post('do');
 
 /* =====================================================================
@@ -205,6 +258,8 @@ if ($do === 'create') {
                 [$id, $it['menu_item_id'], $it['name'], $it['price'], $it['quantity']]
             );
         }
+
+        consume_ingredients_for_order($id, $items);
 
         if ($tableId !== null) {
             db_run("UPDATE tables SET status = 'Occupied' WHERE id = ? AND status = 'Available'", [$tableId]);
