@@ -9,16 +9,34 @@
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?logo=php&logoColor=white)
 ![MariaDB](https://img.shields.io/badge/MariaDB-10.4-003545?logo=mariadb&logoColor=white)
 
-A full-stack PHP 8 / MariaDB restaurant management system — orders, a live
-kitchen display, payments with a duplicate-payment guard, table
-reservations, inventory with an append-only stock ledger, staff/attendance,
-and role-based access control for five staff roles, built on a single PDO
-connection with no framework.
+**What it does, in plain terms:** a waiter takes an order on a tablet or
+till, the kitchen sees it appear on a live screen and works through it,
+the till takes payment and prints a receipt, and a manager can see the
+day's sales, who's booked a table tonight, and what's low in the
+storeroom — all from one system, with each staff member only able to see
+and do what their role allows.
+
+**For developers:** a full-stack PHP 8 / MariaDB restaurant management
+system — orders, a live kitchen display, payments with a duplicate-payment
+guard, table reservations, inventory with an append-only stock ledger,
+staff/attendance, and role-based access control for five staff roles,
+built on a single PDO connection with no framework.
 
 This started as an inherited, insecure PHP admin template (see `AUDIT.md`)
 and was rebuilt in a series of documented, migration-by-migration passes —
-`README.md`'s "Current state" section and the `sql/migrations/` folder are
+this file's "Current state" section and the `sql/migrations/` folder are
 the full paper trail of what changed and why.
+
+**Jump to:** [Features](#features) ·
+[Screenshots](#screenshots) ·
+[Quick start](#quick-start) ·
+[Running it](#running-it) ·
+[What to check first](#what-to-check-first) ·
+[Architecture](#architecture) ·
+[Testing](#testing) ·
+[Current state](#current-state) ·
+[Known limitations](#known-limitations) ·
+[Before going live](#before-going-live)
 
 ## Features
 
@@ -43,6 +61,25 @@ the full paper trail of what changed and why.
 - **Security throughout** — CSRF tokens on every form, bound parameters
   everywhere, secure image uploads (content-verified, not extension-
   trusted), session hardening, POST-only mutations.
+
+## Screenshots
+
+<!--
+  Each row below is a placeholder — drop the named file into
+  docs/screenshots/ and the image appears automatically; nothing else in
+  this file needs to change. See the PR/commit that added this section
+  for the exact page + role to screenshot for each one.
+-->
+
+| | |
+|---|---|
+| **Dashboard** — KPIs, revenue trend, low stock, today's reservations | ![Dashboard](docs/screenshots/dashboard.png) |
+| **New order** — menu grid, cart, live tax/service estimate | ![New order](docs/screenshots/place_order.png) |
+| **Kitchen display** — Pending/Preparing/Ready board | ![Kitchen display](docs/screenshots/kitchen.png) |
+| **Invoice** — items, totals, every payment against the order | ![Invoice](docs/screenshots/invoice.png) |
+
+Missing a screenshot? The image just won't render — nothing else breaks.
+See `docs/screenshots/README.md` for exactly what to capture.
 
 ## Tech stack
 
@@ -102,6 +139,7 @@ them **in order**:
 | `sql/migrations/005_order_items_and_totals.sql` | Adds `order_items` (real quantities), tax/service charge, table + waiter on orders |
 | `sql/migrations/006_payments_guard.sql` | Tightens `payments` (amount/date/method required, amount must be positive) |
 | `sql/migrations/007_reservations_and_inventory.sql` | Adds `reservations` (replaces `table_bookings`), `inventory_items`, `stock_movements` |
+| `sql/migrations/008_menu_item_ingredients.sql` | Adds `menu_item_ingredients` — links a menu item's recipe to inventory, so placing an order consumes stock |
 
 Each file has verification queries at the bottom and a rollback block.
 
@@ -123,6 +161,10 @@ Each file has verification queries at the bottom and a rollback block.
 > `table_bookings_legacy` and moves its 3 rows into the new `reservations`
 > table. `table_bookings` had no `party_size` column, so those 3 rows get
 > a blank party size — read the "JUDGEMENT CALLS" block for the rest.
+
+> **008 starts empty.** There is no existing recipe data anywhere to
+> backfill — every ingredient list is entered by hand from `menu.php`
+> after this runs. Requires 007 first.
 
 ### 4. Open the app
 
@@ -177,6 +219,14 @@ behaves:
 | `inventory.php` | Add an item with a starting quantity — check `stock_movements.php` got a "Received / Initial stock" row for it. Set a reorder level above the quantity and confirm the row highlights and the dashboard's "Low stock" card picks it up. |
 | `stock_movements.php` | Record a "Used" movement larger than what's on hand — it should be rejected rather than taking stock negative. Try a "Correction" — it should require you to pick increase/decrease. There is deliberately no edit or delete here; a mistake gets a new correcting movement, not an edited history. |
 | `index.php` | New "Low stock" and "Today's reservations" cards, only once 007 has run. |
+
+**After running migration 008**, also check:
+
+| Page | What to look for |
+|---|---|
+| `menu.php` | Each item gets a new list-check icon ("Ingredients"). Open it, add a stock item + quantity, save — the button should now reflect that a recipe exists. |
+| Placing an order | Order that item through `place_order.php`, then check `stock_movements.php` — a "Used" row should appear, reason "Order #&lt;id&gt;", for the quantity you set times how many you ordered. `inventory.php`'s "on hand" figure should have dropped by exactly that much. |
+| Negative stock | Order enough of a low-stock item to take it negative — the order should still go through (this is intentional; see "Known limitations"). |
 
 **Pass 7 — every remaining page converted:**
 
@@ -345,6 +395,11 @@ extracted the pure order-total and status-transition logic out of
 tested (see "Testing"). `composer.json`, a PHPUnit suite, GitHub Actions
 CI, and an MIT `LICENSE` were added — the repo is now the size of the
 actual application, not the template it was built on top of.
+Inventory linked to menu items: `menu_item_ingredients` (migration 008)
+holds a per-dish recipe, set from a new Ingredients button on `menu.php`;
+placing an order now records a real stock movement for every ingredient
+consumed, closing the one item on the "Known limitations" list that was
+an actual missing feature rather than a deliberate data-honesty call.
 
 **Next** — assign the manager/cashier/chef roles to real staff accounts,
 exercise the app end-to-end, and the remaining "Before going live" items
@@ -354,34 +409,53 @@ below. See `AUDIT.md` and `AUDIT-ADDENDUM.md` for the full history.
 
 ## Known limitations
 
-- **Five roles are supported in code**; only `admin` and `waiter` exist in the
-  database so far. Assign the rest from **Users**.
-- **Historical orders (1–20) have gaps migration 005 could not fill honestly**:
-  5 orders stored their items as plain text with no price, 2 stored `[]` with
-  a nonzero total, and several totals still do not reconcile with their items
-  (pre-existing data problems documented as BUG-3/BUG-4 in `AUDIT-ADDENDUM.md`,
-  surfaced — not fixed — by the migration's verification queries).
-- **Order 19's known double payment (BUG-5) is left in the data on purpose.**
-  The guard added in migration 006 / `actions/payments.php` only stops *new*
-  overpayments; it does not retroactively fix the one that already happened.
-  It shows clearly on `invoice.php?id=19` as overpaid.
-- **Payments have no link back to a specific customer unless you pick one.**
-  Orders capture `customer_name` as free text with no foreign key to
-  `customers`; recording a payment against a `customers` row is optional,
-  not required, since forcing a match would mean inventing a link the data
-  doesn't have.
+None of these are oversights — each is a deliberate call not to invent
+data, or a documented boundary on a feature's scope. Two of them you can
+resolve yourself right now with tools already in the app; the rest are
+honest facts about historical data that no code change can fix without
+guessing.
+
+**Resolve these yourself, right now, from the UI:**
+
+- **Only `admin` and `waiter` roles have real accounts.** The other three
+  (`manager`, `cashier`, `chef`) are fully supported everywhere in
+  code — every `require_role()` check already accounts for them — there
+  just aren't accounts using them yet. **Users** → **Add user**.
+- **Order 19's known double payment (BUG-5)** shows clearly as overpaid on
+  `invoice.php?id=19`. The guard in `actions/payments.php` stops *new*
+  overpayments; it can't decide for you which of the two old payments was
+  the mistake, because that's a real business decision (refund? were they
+  actually two separate charges?), not a data bug with one obvious right
+  answer. Once you've decided, delete the wrong one from **Payments**.
+
+**Permanent — the data genuinely doesn't say, so nothing here invents an answer:**
+
+- **5 of the 20 historical orders have unpriced line items, and several
+  totals don't reconcile with their items.** `orders.items` predates
+  `order_items` and stored three incompatible formats (BUG-3/BUG-4 in
+  `AUDIT-ADDENDUM.md`); migration 005's backfill surfaces these mismatches
+  in its verification queries rather than silently "correcting" them.
+- **The 3 reservations migrated from `table_bookings`** have no
+  `party_size` — that table never recorded one.
+- **Payments aren't required to link to a `customers` record.** Orders
+  capture `customer_name` as free text with no foreign key to `customers`;
+  forcing every payment to match one would mean inventing a relationship
+  the data doesn't have. Linking one is optional, from the payment form.
 - **Editing an order with pre-migration-005 line items** (free-text, no
-  `menu_item_id`) drops those specific lines if you save changes — the cart
-  can only represent real, priced menu items. `update_order.php` calls this
-  out before you save.
-- **Inventory has no link to menu items or orders.** It tracks raw stock
-  (ingredients, supplies) on its own; placing an order does not decrement
-  anything. Wiring a recipe/ingredient list to each menu item so stock
-  depletes automatically is a real feature, not a small addition — it
-  changes what "editing a menu item" means — so it was left out rather than
-  bolted on quickly. Worth a dedicated pass if you want it.
-- **The 3 migrated reservations have no `party_size`.** `table_bookings`
-  never recorded one; the migration leaves it blank rather than guessing.
+  `menu_item_id`) drops those specific lines if you save changes — the
+  cart can only represent real, priced menu items. `update_order.php`
+  calls this out before you save.
+
+**A feature with documented edges, not a gap** — inventory *is* now linked
+to menu items (migration 008, `menu.php`'s Ingredients button): placing an
+order records a `Used` stock movement for every ingredient the dish
+consumes. On purpose, it does **not**:
+- reverse consumption when an order is edited (only creating a new order
+  consumes stock — reversing-and-reapplying on edit is separable work),
+- restore stock when an order is cancelled, or
+- block placing an order that would take stock negative — a kitchen has
+  to be able to serve food regardless of what the ledger says; negative
+  `quantity_on_hand` after an order is a signal to recount, not a bug.
 
 ---
 
